@@ -1,6 +1,8 @@
 import os
 import pandas as pd
 import streamlit as st
+from google import genai
+from google.genai import types
 
 # Set page configuration with branding
 st.set_page_config(page_title="Excel Insight", layout="wide")
@@ -12,11 +14,35 @@ st.title("💡 Excel Insight")
 if "dataframes" not in st.session_state:
     st.session_state.dataframes = {}
 
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 if "excel_url" not in st.session_state:
     st.session_state.excel_url = ""
 
+# --- Sidebar Configuration (Automated Secrets Extraction) ---
+st.sidebar.header("🔑 Gemini Configuration")
+
+# Securely extract key from Streamlit's secrets engine
+gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
+
+if gemini_api_key:
+    st.sidebar.success("🔒 API Key loaded securely from Secrets!")
+else:
+    st.sidebar.warning("⚠️ GEMINI_API_KEY not detected in Streamlit Secrets.")
+
+model_choice = st.sidebar.selectbox(
+    "Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"]
+)
+
+# Option to wipe chat history
+st.sidebar.divider()
+if st.sidebar.button("🗑️ Clear Chat History"):
+    st.session_state.messages = []
+    st.rerun()
+
 # Tabs for organization
-tab1, tab2 = st.tabs(["📥 Import Data", "📊 Data View"])
+tab1, tab2 = st.tabs(["📥 Import Data", "🤖 AI Insight Chat"])
 
 with tab1:
     st.subheader("Load Excel Data")
@@ -67,15 +93,80 @@ with tab1:
             except Exception as e:
                 st.error(f"Error loading {file.name}: {e}")
 
-with tab2:
-    st.subheader("🧐 Inspect Loaded Datasets")
+    if st.session_state.dataframes:
+        st.subheader("📋 Active Data Previews")
+        for name, df in st.session_state.dataframes.items():
+            with st.expander(f"View {name} ({df.shape} rows)"):
+                st.dataframe(df.head(10))
 
-    # Guard rail: check if data exists
+with tab2:
+    st.subheader("💬 Chat with your Excel Data")
+
+    # Guard rails
     if not st.session_state.dataframes:
         st.warning("Please upload a file or load a URL in the 'Import Data' tab first.")
+    elif not gemini_api_key:
+        st.error("Missing API Key! Please verify GEMINI_API_KEY setup in your Streamlit application dashboard.")
     else:
-        # Loop through loaded dataframes to offer full interactive views
+        # Construct raw dataset snapshots for context
+        data_context = "You are an analytical assistant exploring these spreadsheet datasets:\n\n"
         for name, df in st.session_state.dataframes.items():
-            with st.expander(f"📁 {name} — ({df.shape[0]} rows, {df.shape[1]} columns)", expanded=True):
-                # Interactive streamable data table
-                st.dataframe(df, use_container_width=True)
+            data_context += f"--- File Name: {name} ---\n"
+            data_context += f"Columns: {', '.join(df.columns.astype(str).tolist())}\n"
+            data_context += f"Sample Data Rows:\n{df.head(5).to_string()}\n\n"
+
+        # Display history
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        # Handle user prompt inputs
+        if prompt := st.chat_input("Ask a question about your data..."):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+
+            with st.chat_message("assistant"):
+                try:
+                    # Construct client via Google GenAI Python SDK using the safe secret variable
+                    client = genai.Client(api_key=gemini_api_key)
+                    
+                    # Package chat context and systemic guide bounds
+                    system_instruction = (
+                        f"{data_context}Answer user queries based strictly on the data columns and sample rows provided. "
+                        "If operations require structured analysis, walk the user through step-by-step calculations."
+                    )
+                    
+                    # Convert internal message lists into standard formats
+                    contents_input = []
+                    for m in st.session_state.messages:
+                        role_name = "user" if m["role"] == "user" else "model"
+                        contents_input.append(
+                            types.Content(
+                                role=role_name,
+                                parts=[types.Part.from_text(text=m["content"])]
+                            )
+                        )
+
+                    # Inner generator function to stream response chunks to UI
+                    def response_generator():
+                        response_stream = client.models.generate_content_stream(
+                            model=model_choice,
+                            contents=contents_input,
+                            config=types.GenerateContentConfig(
+                                system_instruction=system_instruction,
+                                temperature=0.1
+                            )
+                        )
+                        for chunk in response_stream:
+                            if chunk.text:
+                                yield chunk.text
+
+                    # Write the generator content live to the app page with streaming animation
+                    full_response = st.write_stream(response_generator())
+                    
+                    # Save assistant answers into states
+                    st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    
+                except Exception as e:
+                    st.error(f"Gemini API Engine Error: {e}")
