@@ -1,8 +1,7 @@
 import os
 import pandas as pd
 import streamlit as st
-from google import genai
-from google.genai import types
+from openai import OpenAI  # ⚡ Changed from Google GenAI to modern OpenAI SDK
 
 # 1. Page Configuration
 st.set_page_config(page_title="Excel Insight", layout="wide")
@@ -27,7 +26,7 @@ st.markdown(
         padding-top: 2px !important;
         padding-bottom: 2px !important;
     }
-    /* INCREASED VIEWPORT MARGIN: Enlarges the chat history scrollable area */
+    /* VIEWPORT MARGIN: Enlarges the chat history scrollable area */
     div[data-testid="stVBox"] > div:has(div[data-testid="stChatMessage"]) {
         max-height: 72vh !important;
         overflow-y: auto !important;
@@ -62,18 +61,19 @@ if "messages" not in st.session_state:
 if "excel_url" not in st.session_state:
     st.session_state.excel_url = ""
 
-# 5. Sidebar Configuration (Automated Secrets Extraction)
-st.sidebar.header("🔑 Gemini Configuration")
+# 5. Sidebar Configuration (Automated OpenAI Secrets Extraction)
+st.sidebar.header("🔑 OpenAI Configuration")
 
-gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
+# ⚡ Swapped key check hook to pull OPENAI_API_KEY from secrets
+openai_api_key = st.secrets.get("OPENAI_API_KEY", "")
 
-if gemini_api_key:
+if openai_api_key:
     st.sidebar.success("🔒 API Key loaded securely from Secrets!")
 else:
-    st.sidebar.warning("⚠️ GEMINI_API_KEY not detected in Streamlit Secrets.")
+    st.sidebar.warning("⚠️ OPENAI_API_KEY not detected in Streamlit Secrets.")
 
 model_choice = st.sidebar.selectbox(
-    "Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"]
+    "Choose Model", ["gpt-4o-mini", "gpt-4o"]
 )
 
 st.sidebar.divider()
@@ -142,10 +142,10 @@ with tab2:
 
     if not st.session_state.dataframes:
         st.warning("Please upload a file or load a URL in the 'Import Data' tab first.")
-    elif not gemini_api_key:
-        st.error("Missing API Key! Please verify GEMINI_API_KEY setup in your Streamlit application dashboard secrets.")
+    elif not openai_api_key:
+        st.error("Missing API Key! Please verify OPENAI_API_KEY setup in your Streamlit application dashboard secrets.")
     else:
-        # Construct raw, comprehensive dataset text mapping for full-file processing context
+        # Construct raw dataset context payload
         data_context = "You are an analytical assistant exploring these complete spreadsheet datasets:\n\n"
         for name, df in st.session_state.dataframes.items():
             data_context += f"--- File Name: {name} ---\n"
@@ -155,13 +155,12 @@ with tab2:
         # Chat history scroll window
         chat_history_space = st.container(height=620)
 
-        # Print message log history inside the container element
         with chat_history_space:
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
-        # Pinned bottom chat entry field box
+        # Pinned bottom chat entry box
         if prompt := st.chat_input("Ask a question about your data..."):
             
             st.session_state.messages.append({"role": "user", "content": prompt})
@@ -171,54 +170,42 @@ with tab2:
 
             with chat_history_space.chat_message("assistant"):
                 try:
-                    client = genai.Client(api_key=gemini_api_key)
+                    # ⚡ Instantiate the standard OpenAI endpoint engine client
+                    client = OpenAI(api_key=openai_api_key)
                     
                     system_instruction = (
                         f"{data_context}\nAnswer user queries based comprehensively on the full data rows provided. "
                         "Do not limit answers to samples. If operations require structured analysis, walk the user through step-by-step calculations."
                     )
                     
-                    contents_input = []
-                    for m in st.session_state.messages:
-                        role_name = "user" if m["role"] == "user" else "model"
-                        contents_input.append(
-                            types.Content(
-                                role=role_name,
-                                parts=[types.Part.from_text(text=m["content"])]
-                            )
-                        )
+                    # ⚡ Rebuild payload sequence matching OpenAI's list system roles structure
+                    openai_messages = [
+                        {"role": "system", "content": system_instruction}
+                    ] + [
+                        {"role": m["role"], "content": m["content"]}
+                        for m in st.session_state.messages
+                    ]
 
-                    from tenacity import retry, stop_after_attempt, wait_exponential
-
-                    @retry(
-                        stop=stop_after_attempt(3),
-                        wait=wait_exponential(multiplier=1, min=2, max=10),
-                        reraise=True
+                    # ⚡ Trigger real-time completion stream engine parameter call
+                    response_stream = client.chat.completions.create(
+                        model=model_choice,
+                        messages=openai_messages,
+                        temperature=0.1,
+                        stream=True  # Enables stream processing natively
                     )
-                    def call_gemini_stream():
-                        return client.models.generate_content_stream(
-                            model=model_choice,
-                            contents=contents_input,
-                            config=types.GenerateContentConfig(
-                                system_instruction=system_instruction,
-                                temperature=0.1
-                            )
-                        )
 
+                    # Inner generator logic loop processing arriving chunks for st.write_stream
                     def response_generator():
-                        response_stream = call_gemini_stream()
                         for chunk in response_stream:
-                            if chunk.text:
-                                yield chunk.text
+                            # Safely capture text delta metrics without throwing key errors
+                            if chunk.choices[0].delta.content is not None:
+                                yield chunk.choices[0].delta.content
 
-                    # Smooth fallback streaming text animation target with dynamic auto-scrolling
+                    # Stream text token fragments dynamically with automated layout scrolling anchors
                     full_response = st.write_stream(response_generator())
                     
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
                     st.rerun()
                     
                 except Exception as e:
-                    st.error(
-                        "🛑 The Gemini servers are heavily overloaded right now. Please wait a moment and try submitting your message again, "
-                        f"or click 'Clear Chat History' in the sidebar to reset your data size token footprint. Details: {e}"
-                    )
+                    st.error(f"🛑 OpenAI Engine Connection Failure: {e}")
