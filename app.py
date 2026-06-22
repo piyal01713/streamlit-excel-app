@@ -7,29 +7,6 @@ from google.genai import types
 # Set page configuration with branding
 st.set_page_config(page_title="Excel Insight", layout="wide")
 
-# Inject Custom CSS to force the chat input area to stick to the true viewport bottom
-st.markdown(
-    """
-    <style>
-    /* target streamlit's chat input container element */
-    div[data-testid="stChatInput"] {
-        position: fixed !important;
-        bottom: 30px !important;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 9999;
-        background-color: transparent;
-        padding-bottom: 10px;
-    }
-    /* Provide safe bottom padding to conversation space so text isn't cut off by the fixed input */
-    div[data-testid="stVerticalBlock"] > div:has(div[data-testid="stChatMessage"]) {
-        padding-bottom: 100px !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
 # Main Title
 st.title("💡 Excel Insight")
 
@@ -138,20 +115,30 @@ with tab2:
             data_context += f"Columns: {', '.join(df.columns.astype(str).tolist())}\n"
             data_context += f"Sample Data Rows:\n{df.head(5).to_string()}\n\n"
 
-        # Display history directly within the tab layout flow
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+        # Create a clean message flow area
+        message_container = st.container()
 
-        # Chat box interaction layer
-        if prompt := st.chat_input("Ask a question about your data..."):
+        # Display history directly within the standard flow
+        with message_container:
+            for message in st.session_state.messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+
+        # Create a dedicated container for the chat input
+        # Note: Using native elements ensures it scales properly to full page width
+        input_container = st.container()
+        
+        with input_container:
+            prompt = st.chat_input("Ask a question about your data...")
+
+        # Process user entry
+        if prompt:
             st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
+            with message_container.chat_message("user"):
                 st.markdown(prompt)
 
-            with st.chat_message("assistant"):
+            with message_container.chat_message("assistant"):
                 try:
-                    # Construct client via Google GenAI Python SDK
                     client = genai.Client(api_key=gemini_api_key)
                     
                     system_instruction = (
@@ -169,7 +156,6 @@ with tab2:
                             )
                         )
 
-                    # Import tenacity to intercept temporary 503/429 server errors
                     from tenacity import retry, stop_after_attempt, wait_exponential
 
                     @retry(
@@ -195,9 +181,8 @@ with tab2:
 
                     full_response = st.write_stream(response_generator())
                     
-                    # Log final results to persistent session memory
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
-                    st.rerun()  # Triggers UI update to format spacing correctly
+                    st.rerun()
                     
                 except Exception as e:
                     st.error(
