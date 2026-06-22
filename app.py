@@ -4,10 +4,10 @@ import streamlit as st
 from google import genai
 from google.genai import types
 
-# Set page configuration with branding
+# 1. Page Configuration
 st.set_page_config(page_title="Excel Insight", layout="wide")
 
-# OPTIMIZED MARGINS: Expand workspace while preventing browser-level outer scrolling
+# 2. Complete CSS Custom Styling Injection
 st.markdown(
     """
     <style>
@@ -27,20 +27,32 @@ st.markdown(
         padding-top: 2px !important;
         padding-bottom: 2px !important;
     }
-    /* INCREASED VIEWPORT MARGIN: Bumped to 72vh to enlarge the chat canvas */
+    /* INCREASED VIEWPORT MARGIN: Enlarges the chat history scrollable area */
     div[data-testid="stVBox"] > div:has(div[data-testid="stChatMessage"]) {
         max-height: 72vh !important;
         overflow-y: auto !important;
+    }
+    
+    /* Boost font size and weight of tab text (Import Data & AI Insight Chat) */
+    button[data-testid="stMarkdownContainer"] p {
+        font-size: 16px !important;
+        font-weight: 600 !important;
+    }
+
+    /* Enlarge the AI assistant's chat responses, bullet lists, and tables */
+    div[data-testid="stChatMessage"]:has(div[aria-label="chat-message-assistant"]) div[data-testid="stMarkdownContainer"] {
+        font-size: 16px !important;
+        line-height: 1.6 !important;
     }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# Main Title
+# 3. Main Title
 st.title("💡 Excel Insight")
 
-# Initialize session states
+# 4. Initialize Session States
 if "dataframes" not in st.session_state:
     st.session_state.dataframes = {}
 
@@ -50,7 +62,7 @@ if "messages" not in st.session_state:
 if "excel_url" not in st.session_state:
     st.session_state.excel_url = ""
 
-# --- Sidebar Configuration ---
+# 5. Sidebar Configuration (Automated Secrets Extraction)
 st.sidebar.header("🔑 Gemini Configuration")
 
 gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
@@ -69,7 +81,7 @@ if st.sidebar.button("🗑️ Clear Chat History"):
     st.session_state.messages = []
     st.rerun()
 
-# Tabs
+# 6. Layout Tabs
 tab1, tab2 = st.tabs(["📥 Import Data", "🤖 AI Insight Chat"])
 
 with tab1:
@@ -131,24 +143,25 @@ with tab2:
     if not st.session_state.dataframes:
         st.warning("Please upload a file or load a URL in the 'Import Data' tab first.")
     elif not gemini_api_key:
-        st.error("Missing API Key! Please verify GEMINI_API_KEY setup in your Streamlit application dashboard.")
+        st.error("Missing API Key! Please verify GEMINI_API_KEY setup in your Streamlit application dashboard secrets.")
     else:
-        # ⚡ FIX ACCELERATION: We are now passing the full dataset text block directly into the context window
+        # Construct raw, comprehensive dataset text mapping for full-file processing context
         data_context = "You are an analytical assistant exploring these complete spreadsheet datasets:\n\n"
         for name, df in st.session_state.dataframes.items():
             data_context += f"--- File Name: {name} ---\n"
             data_context += f"Columns: {', '.join(df.columns.astype(str).tolist())}\n"
-            data_context += f"Full Data Rows:\n{df.to_string()}\n\n" # <-- Changed from df.head(5) to pass everything
+            data_context += f"Full Data Rows:\n{df.to_string()}\n\n"
 
+        # Chat history scroll window
         chat_history_space = st.container(height=620)
 
-        # Print all older conversation logs
+        # Print message log history inside the container element
         with chat_history_space:
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
-        # Pinned bottom text field box
+        # Pinned bottom chat entry field box
         if prompt := st.chat_input("Ask a question about your data..."):
             
             st.session_state.messages.append({"role": "user", "content": prompt})
@@ -198,6 +211,7 @@ with tab2:
                             if chunk.text:
                                 yield chunk.text
 
+                    # Smooth fallback streaming text animation target with dynamic auto-scrolling
                     full_response = st.write_stream(response_generator())
                     
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
