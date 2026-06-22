@@ -7,7 +7,32 @@ from google.genai import types
 # Set page configuration with branding
 st.set_page_config(page_title="Excel Insight", layout="wide")
 
-# Main Title
+# ⚡ CRITICAL FIX: Eliminate unused whitespace margins at the top and sides of the app canvas
+st.markdown(
+    """
+    <style>
+    /* Remove padding at the very top of the main app container */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 0rem !important;
+        margin-top: 0rem !important;
+    }
+    /* Reduce the massive whitespace gap above the main header title */
+    [data-testid="stHeader"] {
+        height: 0px !important;
+        background: transparent !important;
+    }
+    /* Optimize padding inside tab panels to save vertical pixel rows */
+    [data-testid="stTab"] {
+        padding-top: 5px !important;
+        padding-bottom: 5px !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# Main Title (Now tightly pulled to the top)
 st.title("💡 Excel Insight")
 
 # Initialize session states
@@ -115,9 +140,8 @@ with tab2:
             data_context += f"Columns: {', '.join(df.columns.astype(str).tolist())}\n"
             data_context += f"Sample Data Rows:\n{df.head(5).to_string()}\n\n"
 
-        # ⚡ CRITICAL FIX 1: Create a scrollable conversation log area with a fixed height.
-        # This keeps the history from pushing the chat input off the screen, and enforces auto-scroll.
-        chat_history_space = st.container(height=550)
+        # ⚡ CRITICAL FIX: Expanded container viewport height from 550 to 750 to maximize visibility
+        chat_history_space = st.container(height=750)
 
         # Print all older conversation logs within the scoped layout window
         with chat_history_space:
@@ -125,18 +149,14 @@ with tab2:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
-        # ⚡ CRITICAL FIX 2: Place the text input OUTSIDE the scrollable container.
-        # This locks the input box to the bottom of the tab framework so it remains visible at all times.
+        # Pinned chat entry field positioned cleanly beneath the enlarged history canvas
         if prompt := st.chat_input("Ask a question about your data..."):
             
-            # 1. Update session memory with user prompt
             st.session_state.messages.append({"role": "user", "content": prompt})
             
-            # 2. Instantly print user message into the history window
             with chat_history_space.chat_message("user"):
                 st.markdown(prompt)
 
-            # 3. Stream Gemini response inside the history window
             with chat_history_space.chat_message("assistant"):
                 try:
                     client = genai.Client(api_key=gemini_api_key)
@@ -179,13 +199,10 @@ with tab2:
                             if chunk.text:
                                 yield chunk.text
 
-                    # Write the generator content live with automatic auto-scrolling
+                    # Write content live with integrated auto-scrolling
                     full_response = st.write_stream(response_generator())
                     
-                    # Log final results to persistent session memory
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
-                    
-                    # ⚡ CRITICAL FIX 3: Rerun ensures layout structures sync up perfectly
                     st.rerun()
                     
                 except Exception as e:
