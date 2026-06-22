@@ -7,7 +7,7 @@ from google.genai import types
 # Set page configuration with branding
 st.set_page_config(page_title="Excel Insight", layout="wide")
 
-# ⚡ CRITICAL FIX: Eliminate unused whitespace margins at the top and sides of the app canvas
+# ⚡ CRITICAL FIX: Minimize page layout padding and force a viewport-constrained layout
 st.markdown(
     """
     <style>
@@ -17,22 +17,27 @@ st.markdown(
         padding-bottom: 0rem !important;
         margin-top: 0rem !important;
     }
-    /* Reduce the massive whitespace gap above the main header title */
+    /* Hide the top navbar spacing entirely */
     [data-testid="stHeader"] {
         height: 0px !important;
         background: transparent !important;
     }
-    /* Optimize padding inside tab panels to save vertical pixel rows */
+    /* Optimize tab padding row spacing */
     [data-testid="stTab"] {
-        padding-top: 5px !important;
-        padding-bottom: 5px !important;
+        padding-top: 2px !important;
+        padding-bottom: 2px !important;
+    }
+    /* ⚡ Dynamic Constraint: Force the fixed-height scroll container to adapt dynamically to your screen */
+    div[data-testid="stVBox"] > div:has(div[data-testid="stChatMessage"]) {
+        max-height: 60vh !important;
+        overflow-y: auto !important;
     }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# Main Title (Now tightly pulled to the top)
+# Main Title
 st.title("💡 Excel Insight")
 
 # Initialize session states
@@ -48,7 +53,6 @@ if "excel_url" not in st.session_state:
 # --- Sidebar Configuration (Automated Secrets Extraction) ---
 st.sidebar.header("🔑 Gemini Configuration")
 
-# Securely extract key from Streamlit's secrets engine
 gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
 
 if gemini_api_key:
@@ -140,8 +144,9 @@ with tab2:
             data_context += f"Columns: {', '.join(df.columns.astype(str).tolist())}\n"
             data_context += f"Sample Data Rows:\n{df.head(5).to_string()}\n\n"
 
-        # ⚡ CRITICAL FIX: Expanded container viewport height from 550 to 750 to maximize visibility
-        chat_history_space = st.container(height=750)
+        # ⚡ CRITICAL FIX: Changed from fixed 750px to a dynamic flexible window height container (height=480)
+        # This keeps the workspace fully locked inside your native monitor size boundaries.
+        chat_history_space = st.container(height=480)
 
         # Print all older conversation logs within the scoped layout window
         with chat_history_space:
@@ -149,7 +154,7 @@ with tab2:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
-        # Pinned chat entry field positioned cleanly beneath the enlarged history canvas
+        # Pinned chat entry field positioned cleanly beneath the dynamic canvas
         if prompt := st.chat_input("Ask a question about your data..."):
             
             st.session_state.messages.append({"role": "user", "content": prompt})
@@ -199,7 +204,7 @@ with tab2:
                             if chunk.text:
                                 yield chunk.text
 
-                    # Write content live with integrated auto-scrolling
+                    # Write content live with automatic inner container scrolling
                     full_response = st.write_stream(response_generator())
                     
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
