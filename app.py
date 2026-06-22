@@ -7,6 +7,29 @@ from google.genai import types
 # Set page configuration with branding
 st.set_page_config(page_title="Excel Insight", layout="wide")
 
+# Inject Custom CSS to force the chat input area to stick to the true viewport bottom
+st.markdown(
+    """
+    <style>
+    /* target streamlit's chat input container element */
+    div[data-testid="stChatInput"] {
+        position: fixed !important;
+        bottom: 30px !important;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        background-color: transparent;
+        padding-bottom: 10px;
+    }
+    /* Provide safe bottom padding to conversation space so text isn't cut off by the fixed input */
+    div[data-testid="stVerticalBlock"] > div:has(div[data-testid="stChatMessage"]) {
+        padding-bottom: 100px !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # Main Title
 st.title("💡 Excel Insight")
 
@@ -115,12 +138,12 @@ with tab2:
             data_context += f"Columns: {', '.join(df.columns.astype(str).tolist())}\n"
             data_context += f"Sample Data Rows:\n{df.head(5).to_string()}\n\n"
 
-        # Display history
+        # Display history directly within the tab layout flow
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-        # Handle user prompt inputs
+        # Chat box interaction layer
         if prompt := st.chat_input("Ask a question about your data..."):
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
@@ -128,16 +151,14 @@ with tab2:
 
             with st.chat_message("assistant"):
                 try:
-                    # Construct client via Google GenAI Python SDK using the safe secret variable
+                    # Construct client via Google GenAI Python SDK
                     client = genai.Client(api_key=gemini_api_key)
                     
-                    # Package chat context and systemic guide bounds
                     system_instruction = (
                         f"{data_context}Answer user queries based strictly on the data columns and sample rows provided. "
                         "If operations require structured analysis, walk the user through step-by-step calculations."
                     )
                     
-                    # Convert internal message lists into standard formats
                     contents_input = []
                     for m in st.session_state.messages:
                         role_name = "user" if m["role"] == "user" else "model"
@@ -148,9 +169,16 @@ with tab2:
                             )
                         )
 
-                    # Inner generator function to stream response chunks to UI
-                    def response_generator():
-                        response_stream = client.models.generate_content_stream(
+                    # Import tenacity to intercept temporary 503/429 server errors
+                    from tenacity import retry, stop_after_attempt, wait_exponential
+
+                    @retry(
+                        stop=stop_after_attempt(3),
+                        wait=wait_exponential(multiplier=1, min=2, max=10),
+                        reraise=True
+                    )
+                    def call_gemini_stream():
+                        return client.models.generate_content_stream(
                             model=model_choice,
                             contents=contents_input,
                             config=types.GenerateContentConfig(
@@ -158,15 +186,21 @@ with tab2:
                                 temperature=0.1
                             )
                         )
+
+                    def response_generator():
+                        response_stream = call_gemini_stream()
                         for chunk in response_stream:
                             if chunk.text:
                                 yield chunk.text
 
-                    # Write the generator content live to the app page with streaming animation
                     full_response = st.write_stream(response_generator())
                     
-                    # Save assistant answers into states
+                    # Log final results to persistent session memory
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    st.rerun()  # Triggers UI update to format spacing correctly
                     
                 except Exception as e:
-                    st.error(f"Gemini API Engine Error: {e}")
+                    st.error(
+                        "🛑 The Gemini servers are heavily overloaded right now. Please wait a moment and try submitting your message again, "
+                        f"or click 'Clear Chat History' in the sidebar to reset your data size token footprint. Details: {e}"
+                    )
