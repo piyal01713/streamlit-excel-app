@@ -7,7 +7,7 @@ from google.genai import types
 # Set page configuration with branding
 st.set_page_config(page_title="Excel Insight", layout="wide")
 
-# ⚡ OPTIMIZED MARGINS: Expand workspace while preventing browser-level outer scrolling
+# OPTIMIZED MARGINS: Expand workspace while preventing browser-level outer scrolling
 st.markdown(
     """
     <style>
@@ -27,7 +27,7 @@ st.markdown(
         padding-top: 2px !important;
         padding-bottom: 2px !important;
     }
-    /* ⚡ INCREASED VIEWPORT MARGIN: Bumped from 60vh to 72vh to enlarge the chat canvas */
+    /* INCREASED VIEWPORT MARGIN: Bumped to 72vh to enlarge the chat canvas */
     div[data-testid="stVBox"] > div:has(div[data-testid="stChatMessage"]) {
         max-height: 72vh !important;
         overflow-y: auto !important;
@@ -133,14 +133,13 @@ with tab2:
     elif not gemini_api_key:
         st.error("Missing API Key! Please verify GEMINI_API_KEY setup in your Streamlit application dashboard.")
     else:
-        # Construct raw dataset snapshots for context
-        data_context = "You are an analytical assistant exploring these spreadsheet datasets:\n\n"
+        # ⚡ FIX ACCELERATION: We are now passing the full dataset text block directly into the context window
+        data_context = "You are an analytical assistant exploring these complete spreadsheet datasets:\n\n"
         for name, df in st.session_state.dataframes.items():
             data_context += f"--- File Name: {name} ---\n"
             data_context += f"Columns: {', '.join(df.columns.astype(str).tolist())}\n"
-            data_context += f"Sample Data Rows:\n{df.head(5).to_string()}\n\n"
+            data_context += f"Full Data Rows:\n{df.to_string()}\n\n" # <-- Changed from df.head(5) to pass everything
 
-        # ⚡ ENLARGED VIEWPORT CONTAINER: Increased container window height mapping from 480 to 620
         chat_history_space = st.container(height=620)
 
         # Print all older conversation logs
@@ -162,8 +161,8 @@ with tab2:
                     client = genai.Client(api_key=gemini_api_key)
                     
                     system_instruction = (
-                        f"{data_context}Answer user queries based strictly on the data columns and sample rows provided. "
-                        "If operations require structured analysis, walk the user through step-by-step calculations."
+                        f"{data_context}\nAnswer user queries based comprehensively on the full data rows provided. "
+                        "Do not limit answers to samples. If operations require structured analysis, walk the user through step-by-step calculations."
                     )
                     
                     contents_input = []
