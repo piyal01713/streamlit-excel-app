@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import streamlit as st
-from openai import OpenAI  # ⚡ Changed from Google GenAI to modern OpenAI SDK
+from openai import OpenAI  
 
 # 1. Page Configuration
 st.set_page_config(page_title="Excel Insight", layout="wide")
@@ -61,14 +61,18 @@ if "messages" not in st.session_state:
 if "excel_url" not in st.session_state:
     st.session_state.excel_url = ""
 
-# 5. Sidebar Configuration (Automated OpenAI Secrets Extraction)
-st.sidebar.header("🔑 OpenAI Configuration")
+# 5. Sidebar Configuration (Automated OpenAI / Proxy Secrets Extraction)
+st.sidebar.header("🔑 AI Configuration")
 
-# ⚡ Swapped key check hook to pull OPENAI_API_KEY from secrets
+# Extract key and custom endpoint URL from your Streamlit dashboard secrets
 openai_api_key = st.secrets.get("OPENAI_API_KEY", "")
+openai_base_url = st.secrets.get("OPENAI_BASE_URL", None)
 
 if openai_api_key:
-    st.sidebar.success("🔒 API Key loaded securely from Secrets!")
+    if openai_base_url:
+        st.sidebar.success("🔒 API Key & Custom URL loaded securely!")
+    else:
+        st.sidebar.success("🔒 API Key loaded securely from Secrets!")
 else:
     st.sidebar.warning("⚠️ OPENAI_API_KEY not detected in Streamlit Secrets.")
 
@@ -145,14 +149,14 @@ with tab2:
     elif not openai_api_key:
         st.error("Missing API Key! Please verify OPENAI_API_KEY setup in your Streamlit application dashboard secrets.")
     else:
-        # Construct raw dataset context payload
+        # Construct dataset snapshot payload context
         data_context = "You are an analytical assistant exploring these complete spreadsheet datasets:\n\n"
         for name, df in st.session_state.dataframes.items():
             data_context += f"--- File Name: {name} ---\n"
             data_context += f"Columns: {', '.join(df.columns.astype(str).tolist())}\n"
             data_context += f"Full Data Rows:\n{df.to_string()}\n\n"
 
-        # Chat history scroll window
+        # Chat history scroll window container
         chat_history_space = st.container(height=620)
 
         with chat_history_space:
@@ -160,7 +164,7 @@ with tab2:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
-        # Pinned bottom chat entry box
+        # Pinned bottom chat input interaction field
         if prompt := st.chat_input("Ask a question about your data..."):
             
             st.session_state.messages.append({"role": "user", "content": prompt})
@@ -170,15 +174,18 @@ with tab2:
 
             with chat_history_space.chat_message("assistant"):
                 try:
-                    # ⚡ Instantiate the standard OpenAI endpoint engine client
-                    client = OpenAI(api_key=openai_api_key)
+                    # Instantiates OpenAI endpoint engine client, passing custom proxy base url if provided
+                    client = OpenAI(
+                        api_key=openai_api_key,
+                        base_url=openai_base_url if openai_base_url else None
+                    )
                     
                     system_instruction = (
                         f"{data_context}\nAnswer user queries based comprehensively on the full data rows provided. "
                         "Do not limit answers to samples. If operations require structured analysis, walk the user through step-by-step calculations."
                     )
                     
-                    # ⚡ Rebuild payload sequence matching OpenAI's list system roles structure
+                    # Convert history state data payload sequence matching OpenAI's list system structures
                     openai_messages = [
                         {"role": "system", "content": system_instruction}
                     ] + [
@@ -186,26 +193,25 @@ with tab2:
                         for m in st.session_state.messages
                     ]
 
-                    # ⚡ Trigger real-time completion stream engine parameter call
+                    # Trigger API stream parameter execution call
                     response_stream = client.chat.completions.create(
                         model=model_choice,
                         messages=openai_messages,
                         temperature=0.1,
-                        stream=True  # Enables stream processing natively
+                        stream=True  
                     )
 
-                    # Inner generator logic loop processing arriving chunks for st.write_stream
+                    # Dynamic text token chunk data parser
                     def response_generator():
                         for chunk in response_stream:
-                            # Safely capture text delta metrics without throwing key errors
-                            if chunk.choices[0].delta.content is not None:
-                                yield chunk.choices[0].delta.content
+                            if chunk.choices.delta.content is not None:
+                                yield chunk.choices.delta.content
 
-                    # Stream text token fragments dynamically with automated layout scrolling anchors
+                    # Write chunks to application tab with smooth automatic scrolling adjustments
                     full_response = st.write_stream(response_generator())
                     
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
                     st.rerun()
                     
                 except Exception as e:
-                    st.error(f"🛑 OpenAI Engine Connection Failure: {e}")
+                    st.error(f"🛑 AI Engine Connection Failure: {e}")
