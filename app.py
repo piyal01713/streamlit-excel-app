@@ -7,29 +7,29 @@ from google.genai import types
 # Set page configuration with branding
 st.set_page_config(page_title="Excel Insight", layout="wide")
 
-# ⚡ CRITICAL FIX: Minimize page layout padding and force a viewport-constrained layout
+# ⚡ OPTIMIZED MARGINS: Expand workspace while preventing browser-level outer scrolling
 st.markdown(
     """
     <style>
-    /* Remove padding at the very top of the main app container */
+    /* Maximize vertical window space by removing top margins */
     .block-container {
         padding-top: 1rem !important;
         padding-bottom: 0rem !important;
         margin-top: 0rem !important;
     }
-    /* Hide the top navbar spacing entirely */
+    /* Hide top header background bar space */
     [data-testid="stHeader"] {
         height: 0px !important;
         background: transparent !important;
     }
-    /* Optimize tab padding row spacing */
+    /* Tighter padding layouts for tabs */
     [data-testid="stTab"] {
         padding-top: 2px !important;
         padding-bottom: 2px !important;
     }
-    /* ⚡ Dynamic Constraint: Force the fixed-height scroll container to adapt dynamically to your screen */
+    /* ⚡ INCREASED VIEWPORT MARGIN: Bumped from 60vh to 72vh to enlarge the chat canvas */
     div[data-testid="stVBox"] > div:has(div[data-testid="stChatMessage"]) {
-        max-height: 60vh !important;
+        max-height: 72vh !important;
         overflow-y: auto !important;
     }
     </style>
@@ -50,7 +50,7 @@ if "messages" not in st.session_state:
 if "excel_url" not in st.session_state:
     st.session_state.excel_url = ""
 
-# --- Sidebar Configuration (Automated Secrets Extraction) ---
+# --- Sidebar Configuration ---
 st.sidebar.header("🔑 Gemini Configuration")
 
 gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
@@ -64,19 +64,17 @@ model_choice = st.sidebar.selectbox(
     "Choose Model", ["gemini-2.5-flash", "gemini-2.5-pro"]
 )
 
-# Option to wipe chat history
 st.sidebar.divider()
 if st.sidebar.button("🗑️ Clear Chat History"):
     st.session_state.messages = []
     st.rerun()
 
-# Tabs for organization
+# Tabs
 tab1, tab2 = st.tabs(["📥 Import Data", "🤖 AI Insight Chat"])
 
 with tab1:
     st.subheader("Load Excel Data")
 
-    # URL Input
     excel_url = st.text_input(
         "Excel URL",
         value=st.session_state.excel_url,
@@ -107,7 +105,6 @@ with tab1:
 
     st.divider()
 
-    # Multi-file Uploader
     uploaded_files = st.file_uploader(
         "Upload Excel files", type=["xlsx", "xls"], accept_multiple_files=True
     )
@@ -131,7 +128,6 @@ with tab1:
 with tab2:
     st.subheader("💬 Chat with your Excel Data")
 
-    # Guard rails
     if not st.session_state.dataframes:
         st.warning("Please upload a file or load a URL in the 'Import Data' tab first.")
     elif not gemini_api_key:
@@ -144,17 +140,16 @@ with tab2:
             data_context += f"Columns: {', '.join(df.columns.astype(str).tolist())}\n"
             data_context += f"Sample Data Rows:\n{df.head(5).to_string()}\n\n"
 
-        # ⚡ CRITICAL FIX: Changed from fixed 750px to a dynamic flexible window height container (height=480)
-        # This keeps the workspace fully locked inside your native monitor size boundaries.
-        chat_history_space = st.container(height=480)
+        # ⚡ ENLARGED VIEWPORT CONTAINER: Increased container window height mapping from 480 to 620
+        chat_history_space = st.container(height=620)
 
-        # Print all older conversation logs within the scoped layout window
+        # Print all older conversation logs
         with chat_history_space:
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
-        # Pinned chat entry field positioned cleanly beneath the dynamic canvas
+        # Pinned bottom text field box
         if prompt := st.chat_input("Ask a question about your data..."):
             
             st.session_state.messages.append({"role": "user", "content": prompt})
@@ -204,7 +199,6 @@ with tab2:
                             if chunk.text:
                                 yield chunk.text
 
-                    # Write content live with automatic inner container scrolling
                     full_response = st.write_stream(response_generator())
                     
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
