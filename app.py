@@ -115,29 +115,29 @@ with tab2:
             data_context += f"Columns: {', '.join(df.columns.astype(str).tolist())}\n"
             data_context += f"Sample Data Rows:\n{df.head(5).to_string()}\n\n"
 
-        # Create a clean message flow area
-        message_container = st.container()
+        # ⚡ CRITICAL FIX 1: Create a scrollable conversation log area with a fixed height.
+        # This keeps the history from pushing the chat input off the screen, and enforces auto-scroll.
+        chat_history_space = st.container(height=550)
 
-        # Display history directly within the standard flow
-        with message_container:
+        # Print all older conversation logs within the scoped layout window
+        with chat_history_space:
             for message in st.session_state.messages:
                 with st.chat_message(message["role"]):
                     st.markdown(message["content"])
 
-        # Create a dedicated container for the chat input
-        # Note: Using native elements ensures it scales properly to full page width
-        input_container = st.container()
-        
-        with input_container:
-            prompt = st.chat_input("Ask a question about your data...")
-
-        # Process user entry
-        if prompt:
+        # ⚡ CRITICAL FIX 2: Place the text input OUTSIDE the scrollable container.
+        # This locks the input box to the bottom of the tab framework so it remains visible at all times.
+        if prompt := st.chat_input("Ask a question about your data..."):
+            
+            # 1. Update session memory with user prompt
             st.session_state.messages.append({"role": "user", "content": prompt})
-            with message_container.chat_message("user"):
+            
+            # 2. Instantly print user message into the history window
+            with chat_history_space.chat_message("user"):
                 st.markdown(prompt)
 
-            with message_container.chat_message("assistant"):
+            # 3. Stream Gemini response inside the history window
+            with chat_history_space.chat_message("assistant"):
                 try:
                     client = genai.Client(api_key=gemini_api_key)
                     
@@ -179,9 +179,13 @@ with tab2:
                             if chunk.text:
                                 yield chunk.text
 
+                    # Write the generator content live with automatic auto-scrolling
                     full_response = st.write_stream(response_generator())
                     
+                    # Log final results to persistent session memory
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    
+                    # ⚡ CRITICAL FIX 3: Rerun ensures layout structures sync up perfectly
                     st.rerun()
                     
                 except Exception as e:
