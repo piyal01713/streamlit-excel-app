@@ -1,57 +1,17 @@
 import pandas as pd
 import streamlit as st
 from anthropic import Anthropic
+import json
 
 # ------------------------------------------------
-# PAGE CONFIG
+# CONFIG
 # ------------------------------------------------
 
-st.set_page_config(
-    page_title="Excel Insight",
-    layout="wide"
-)
+st.set_page_config(page_title="Excel AI Agent", layout="wide")
 
-# ------------------------------------------------
-# CUSTOM CSS
-# ------------------------------------------------
+MODEL = "claude-haiku-4-5-20251001"
 
-st.markdown("""
-<style>
-
-.block-container {
-    padding-top: 1rem !important;
-}
-
-[data-testid="stHeader"] {
-    height: 0px !important;
-    background: transparent !important;
-}
-
-div[data-testid="stVBox"] > div:has(div[data-testid="stChatMessage"]) {
-    max-height: 72vh !important;
-    overflow-y: auto !important;
-}
-
-button[data-testid="stMarkdownContainer"] p {
-    font-size: 16px !important;
-    font-weight: 600 !important;
-}
-
-div[data-testid="stChatMessage"]:has(div[aria-label="chat-message-assistant"])
-div[data-testid="stMarkdownContainer"] {
-
-    font-size:16px !important;
-    line-height:1.6 !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# ------------------------------------------------
-# TITLE
-# ------------------------------------------------
-
-st.title("💡 Excel Insight")
+client = Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY", ""))
 
 # ------------------------------------------------
 # SESSION STATE
@@ -63,272 +23,222 @@ if "dataframes" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if "excel_url" not in st.session_state:
-    st.session_state.excel_url = ""
-
 # ------------------------------------------------
-# SIDEBAR
+# SAFE TOOL LAYER (PANDAS EXECUTOR)
 # ------------------------------------------------
 
-st.sidebar.header("🔑 Claude Configuration")
+def run_pandas_operation(df, op):
+    """
+    Safe execution layer (NO raw Python execution)
+    """
 
-anthropic_api_key = st.secrets.get(
-    "ANTHROPIC_API_KEY",
-    ""
-)
+    try:
+        operation = op.get("operation")
 
-if anthropic_api_key:
-    st.sidebar.success("Claude API Key Loaded")
-else:
-    st.sidebar.warning("ANTHROPIC_API_KEY missing")
+        # -------------------------
+        # GROUPBY
+        # -------------------------
+        if operation == "groupby_sum":
+            return df.groupby(op["group"])[op["column"]].sum()
 
-st.sidebar.divider()
+        if operation == "groupby_mean":
+            return df.groupby(op["group"])[op["column"]].mean()
 
-if st.sidebar.button("🗑️ Clear Chat History"):
-    st.session_state.messages = []
-    st.rerun()
+        # -------------------------
+        # FILTER
+        # -------------------------
+        if operation == "filter_equals":
+            return df[df[op["column"]] == op["value"]]
+
+        # -------------------------
+        # TOP N
+        # -------------------------
+        if operation == "top_n":
+            return df.nlargest(op["n"], op["column"])
+
+        # -------------------------
+        # DESCRIBE
+        # -------------------------
+        if operation == "describe":
+            return df.describe(include="all")
+
+        return f"Unknown operation: {operation}"
+
+    except Exception as e:
+        return f"Execution error: {e}"
+
 
 # ------------------------------------------------
-# TABS
+# CLAUDE PLANNER (STEP 1)
 # ------------------------------------------------
 
-tab1, tab2 = st.tabs(
-    [
-        "📥 Import Data",
-        "🤖 AI Insight Chat"
-    ]
-)
+def get_plan(question, df_columns):
+    """
+    Claude converts natural language → structured JSON
+    """
+
+    system_prompt = f"""
+You are a data analyst planner.
+
+Convert user questions into structured JSON operations.
+
+Available columns:
+{list(df_columns)}
+
+Rules:
+- ONLY output valid JSON
+- No explanations
+- No markdown
+
+Supported operations:
+
+1. groupby_sum
+2. groupby_mean
+3. filter_equals
+4. top_n
+5. describe
+
+Format examples:
+
+User: total sales by month
+{{
+  "operation": "groupby_sum",
+  "group": "month",
+  "column": "sales"
+}}
+
+User: top 5 customers by revenue
+{{
+  "operation": "top_n",
+  "column": "revenue",
+  "n": 5
+}}
+"""
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=300,
+        temperature=0,
+        system=system_prompt,
+        messages=[{"role": "user", "content": question}]
+    )
+
+    try:
+        return json.loads(response.content[0].text)
+    except:
+        return None
+
 
 # ------------------------------------------------
-# IMPORT DATA TAB
+# CLAUDE EXPLAINER (STEP 3)
+# ------------------------------------------------
+
+def explain_result(question, result):
+    """
+    Claude turns computed output into insights
+    """
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=800,
+        temperature=0.2,
+        system="You are an expert data analyst. Explain results clearly and provide business insights.",
+        messages=[
+            {
+                "role": "user",
+                "content": f"""
+Question: {question}
+
+Result:
+{result}
+"""
+            }
+        ]
+    )
+
+    return response.content[0].text
+
+
+# ------------------------------------------------
+# UI
+# ------------------------------------------------
+
+st.title("📊 Excel AI Agent (v2)")
+
+tab1, tab2 = st.tabs(["📥 Import", "🤖 Chat"])
+
+# ------------------------------------------------
+# IMPORT
 # ------------------------------------------------
 
 with tab1:
 
-    st.subheader("Load Excel Data")
-
-    excel_url = st.text_input(
-        "Excel URL",
-        value=st.session_state.excel_url,
-        placeholder="https://example.com/file.xlsx"
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        if st.button("Load URL"):
-
-            try:
-
-                df = pd.read_excel(excel_url)
-
-                st.session_state.dataframes["URL File"] = df
-
-                st.session_state.excel_url = excel_url
-
-                st.success("Excel loaded successfully.")
-
-            except Exception as e:
-
-                st.error(e)
-
-    with col2:
-
-        if st.button("🔄 Resync URL"):
-
-            try:
-
-                if st.session_state.excel_url:
-
-                    df = pd.read_excel(
-                        st.session_state.excel_url
-                    )
-
-                    st.session_state.dataframes["URL File"] = df
-
-                    st.success("URL refreshed.")
-
-            except Exception as e:
-
-                st.error(e)
-
-    st.divider()
-
-    uploaded_files = st.file_uploader(
-        "Upload Excel Files",
+    files = st.file_uploader(
+        "Upload Excel",
         type=["xlsx", "xls"],
         accept_multiple_files=True
     )
 
-    if uploaded_files:
+    for file in files:
+        df = pd.read_excel(file)
+        st.session_state.dataframes[file.name] = df
+        st.success(f"Loaded {file.name}")
 
-        for file in uploaded_files:
-
-            try:
-
-                df = pd.read_excel(file)
-
-                st.session_state.dataframes[file.name] = df
-
-                st.success(f"Loaded {file.name}")
-
-            except Exception as e:
-
-                st.error(e)
-
-    if st.session_state.dataframes:
-
-        st.subheader("📋 Data Preview")
-
-        for name, df in st.session_state.dataframes.items():
-
-            with st.expander(
-                f"{name} | Rows:{df.shape[0]} Columns:{df.shape[1]}"
-            ):
-
-                st.dataframe(df.head(20))
+    for name, df in st.session_state.dataframes.items():
+        with st.expander(name):
+            st.dataframe(df.head(10))
 
 # ------------------------------------------------
-# CHAT TAB
+# CHAT
 # ------------------------------------------------
 
 with tab2:
 
-    st.subheader("💬 Chat with your Excel Data")
-
     if not st.session_state.dataframes:
+        st.warning("Upload Excel first")
+        st.stop()
 
-        st.warning(
-            "Please upload an Excel file first."
-        )
+    df = list(st.session_state.dataframes.values())[0]
 
-    elif not anthropic_api_key:
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-        st.error(
-            "Missing ANTHROPIC_API_KEY."
-        )
+    prompt = st.chat_input("Ask your Excel question...")
 
-    else:
+    if prompt:
 
-        client = Anthropic(
-            api_key=anthropic_api_key
-        )
+        st.session_state.messages.append({
+            "role": "user",
+            "content": prompt
+        })
 
-        # Build dataset context
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-        data_context = ""
+        # -------------------------------
+        # STEP 1: PLAN (Claude)
+        # -------------------------------
+        plan = get_plan(prompt, df.columns)
 
-        for name, df in st.session_state.dataframes.items():
+        if not plan:
+            st.error("Could not generate plan")
+            st.stop()
 
-            preview_rows = min(50, len(df))
+        # -------------------------------
+        # STEP 2: EXECUTE (Python safe layer)
+        # -------------------------------
+        result = run_pandas_operation(df, plan)
 
-            data_context += f"""
+        # -------------------------------
+        # STEP 3: EXPLAIN (Claude)
+        # -------------------------------
+        explanation = explain_result(prompt, result)
 
-FILE: {name}
+        with st.chat_message("assistant"):
+            st.markdown(explanation)
 
-ROWS: {df.shape[0]}
-
-COLUMNS:
-
-{', '.join(df.columns.astype(str).tolist())}
-
-FIRST {preview_rows} ROWS:
-
-{df.head(preview_rows).to_string()}
-
-SUMMARY:
-
-{df.describe(include='all').to_string()}
-
-------------------------------------------------
-
-"""
-
-        # Chat history
-
-        for message in st.session_state.messages:
-
-            with st.chat_message(message["role"]):
-
-                st.markdown(message["content"])
-
-        # User input
-
-        prompt = st.chat_input(
-            "Ask something about your Excel..."
-        )
-
-        if prompt:
-
-            st.session_state.messages.append(
-                {
-                    "role":"user",
-                    "content":prompt
-                }
-            )
-
-            with st.chat_message("user"):
-
-                st.markdown(prompt)
-
-            with st.chat_message("assistant"):
-
-                try:
-
-                    system_prompt = f"""
-
-You are an expert Excel analyst.
-
-You help users:
-
-- Analyze spreadsheets
-- Find trends
-- Calculate statistics
-- Compare values
-- Detect anomalies
-- Explain business insights
-
-Answer ONLY from the uploaded Excel data.
-
-Dataset:
-
-{data_context}
-
-"""
-
-                    response = client.messages.create(
-
-                        model="claude-3-5-haiku-latest",
-
-                        max_tokens=4000,
-
-                        temperature=0.1,
-
-                        system=system_prompt,
-
-                        messages=[
-
-                            {
-                                "role":"user",
-                                "content":prompt
-                            }
-
-                        ]
-
-                    )
-
-                    answer = response.content[0].text
-
-                    st.markdown(answer)
-
-                    st.session_state.messages.append(
-                        {
-                            "role":"assistant",
-                            "content":answer
-                        }
-                    )
-
-                except Exception as e:
-
-                    st.error(f"Error: {e}")
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": explanation
+        })
