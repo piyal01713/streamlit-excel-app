@@ -106,7 +106,6 @@ def get_llm_response(user_query, data_context):
             messages=[{"role": "user", "content": user_content}]
         )
         
-        # FIXED: Extracting raw text from the first content block object in the response list
         raw_text = response.content[0].text.strip()
         
         # Strip out markdown formatting if Claude returned it
@@ -123,6 +122,22 @@ def get_llm_response(user_query, data_context):
     except Exception as e:
         st.error(f"LLM Error: {e}")
         return None
+
+# ------------------------------------------------
+# CONVERSATIONAL RESPONSE GENERATOR
+# ------------------------------------------------
+
+def generate_natural_answer(user_query, execution_result):
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=500,
+            system="You are a helpful data assistant. Use the provided raw dataset results to directly, cleanly, and naturally answer the user's question. Formulate a polite response. Do not output python code.",
+            messages=[{"role": "user", "content": f"User asked: {user_query}\n\nData engine returned this result:\n{execution_result}"}]
+        )
+        return response.content[0].text
+    except Exception as e:
+        return f"Could not generate conversational answer due to an error: {e}"
 
 # ------------------------------------------------
 # STREAMLIT UI
@@ -147,15 +162,19 @@ if uploaded_file:
     if user_query:
         context = build_data_context(df)
         
-        with st.spinner("Analyzing query and matching operation..."):
+        # Step 1: Intercept query and extract JSON operation
+        with st.spinner("Analyzing query and parsing operations..."):
             operation = get_llm_response(user_query, context)
             
         if operation:
-            st.subheader("Extracted JSON Operation")
-            st.json(operation)
-            
-            with st.spinner("Executing pandas engine..."):
+            # Step 2: Execute operation securely inside Pandas
+            with st.spinner("Running secure data lookup engine..."):
                 result = run_pandas_operation(df, operation)
                 
-            st.subheader("Final Query Result")
-            st.text(result)
+            # Step 3: Rewrite table back into regular human text
+            with st.spinner("Synthesizing final natural language answer..."):
+                conversational_answer = generate_natural_answer(user_query, result)
+                
+            # Display the final conversational response to the user
+            st.subheader("Assistant Response")
+            st.write(conversational_answer)
