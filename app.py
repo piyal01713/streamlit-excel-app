@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import streamlit as st
-from openai import AzureOpenAI  # Switched from OpenAI to AzureOpenAI
+from openai import AzureOpenAI  # Handled the explicit Azure OpenAI library import
 
 # 1. Page Configuration
 st.set_page_config(page_title="Excel Insight", layout="wide")
@@ -169,11 +169,12 @@ with tab2:
             
             st.session_state.messages.append({"role": "user", "content": prompt})
             
-            with chat_history_space.with_container():
+            # Clean container target blocks (fixed typo bug)
+            with chat_history_space:
                 with st.chat_message("user"):
                     st.markdown(prompt)
 
-            with chat_history_space.with_container():
+            with chat_history_space:
                 with st.chat_message("assistant"):
                     try:
                         # Instantiates the explicit Azure OpenAI Engine Client
@@ -199,7 +200,7 @@ with tab2:
 
                         # Trigger API stream parameter execution call using Azure deployment name
                         response_stream = client.chat.completions.create(
-                            model=azure_deployment, # Azure uses deployment name here
+                            model=azure_deployment, 
                             messages=openai_messages,
                             temperature=0.1,
                             stream=True  
