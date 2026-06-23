@@ -47,7 +47,7 @@ Row Count: {len(df)}
 """
 
 # ------------------------------------------------
-# SAFE EXECUTOR (UPDATED WITH STRING_CONTAINS)
+# SAFE EXECUTOR (WITH STRING_CONTAINS)
 # ------------------------------------------------
 
 def run_pandas_operation(df, op):
@@ -66,9 +66,7 @@ def run_pandas_operation(df, op):
             res = df[df[op["column"]].astype(str) == str(op["value"])]
             return res.head(20).to_string(index=False)
 
-        # NEW OPERATION: Handles comma-separated values like skills or tags safely
         if operation == "filter_contains":
-            # Case-insensitive substring match
             res = df[df[op["column"]].astype(str).str.contains(str(op["value"]), case=False, na=False)]
             return res.head(20).to_string(index=False)
 
@@ -85,7 +83,7 @@ def run_pandas_operation(df, op):
         return f"Execution error: {e}"
 
 # ------------------------------------------------
-# CLAUDE PLANNER (UPDATED SYSTEM PROMPT)
+# CLAUDE PLANNER & JSON PARSER
 # ------------------------------------------------
 
 def get_llm_response(user_query, data_context):
@@ -93,7 +91,7 @@ def get_llm_response(user_query, data_context):
     - {"operation": "groupby_sum", "group": "column_name", "column": "column_name"}
     - {"operation": "groupby_mean", "group": "column_name", "column": "column_name"}
     - {"operation": "filter_equals", "column": "column_name", "value": "target_value"}
-    - {"operation": "filter_contains", "column": "column_name", "value": "search_term"}  <-- Use this if searching for a skill, tag, or substring within text containing multiple entries or sentences.
+    - {"operation": "filter_contains", "column": "column_name", "value": "search_term"}
     - {"operation": "top_n", "column": "column_name", "n": 5}
     - {"operation": "describe"}
 
@@ -109,7 +107,8 @@ def get_llm_response(user_query, data_context):
             messages=[{"role": "user", "content": user_content}]
         )
         
-        raw_text = response.content.text.strip()
+        # CRITICAL FIX 1: Extract text from index 0
+        raw_text = response.content[0].text.strip()
         
         if raw_text.startswith("```"):
             raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
@@ -119,10 +118,10 @@ def get_llm_response(user_query, data_context):
         return op_json
         
     except json.JSONDecodeError:
-        st.error(f"Failed to parse JSON. Claude's raw response was:\n\n{response.content.text}")
+        st.error(f"Failed to parse JSON. Claude's raw response was:\n\n{response.content[0].text}")
         return None
     except Exception as e:
-        st.error(f"LLM Error: {e}")
+        st.error(f"LLM Error in Planner: {e}")
         return None
 
 # ------------------------------------------------
@@ -137,7 +136,8 @@ def generate_natural_answer(user_query, execution_result):
             system="You are a helpful data assistant. Use the provided raw dataset results to directly, cleanly, and naturally answer the user's question. Formulate a polite response. Do not output python code.",
             messages=[{"role": "user", "content": f"User asked: {user_query}\n\nData engine returned this result:\n{execution_result}"}]
         )
-        return response.content.text
+        # CRITICAL FIX 2: Extract text from index 0
+        return response.content[0].text
     except Exception as e:
         return f"Could not generate conversational answer due to an error: {e}"
 
