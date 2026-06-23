@@ -2,6 +2,7 @@ import pandas as pd
 import streamlit as st
 from anthropic import Anthropic
 import json
+import re
 
 # ------------------------------------------------
 # CONFIG
@@ -11,10 +12,10 @@ st.set_page_config(page_title="Excel AI Agent (Grounded)", layout="wide")
 
 MODEL = "claude-haiku-4-5-20251001"
 
-# CRITICAL FIX: Ensure the key exists before running to prevent empty string API crashes
+# Check for API key in secrets before proceeding
 api_key = st.secrets.get("ANTHROPIC_API_KEY")
 if not api_key:
-    st.error("Missing ANTHROPIC_API_KEY in Streamlit secrets!")
+    st.error("Missing ANTHROPIC_API_KEY in Streamlit secrets! Please add it to your .streamlit/secrets.toml file.")
     st.stop()
 
 client = Anthropic(api_key=api_key)
@@ -59,7 +60,7 @@ def run_pandas_operation(df, op):
 
         if operation == "groupby_sum":
             res = df.groupby(op["group"])[op["column"]].sum()
-            return res.to_string() # Convert to string for safe printing/LLM context
+            return res.to_string()
 
         if operation == "groupby_mean":
             res = df.groupby(op["group"])[op["column"]].mean()
@@ -67,7 +68,7 @@ def run_pandas_operation(df, op):
 
         if operation == "filter_equals":
             res = df[df[op["column"]] == op["value"]]
-            return res.head(20).to_string(index=False) # Limit rows returned to LLM
+            return res.head(20).to_string(index=False)
 
         if operation == "top_n":
             res = df.nlargest(op["n"], op["column"])
@@ -82,7 +83,7 @@ def run_pandas_operation(df, op):
         return f"Execution error: {e}"
 
 # ------------------------------------------------
-# CLAUDE PLANNER & EXECUTION (COMPLETED)
+# CLAUDE PLANNER & JSON PARSER
 # ------------------------------------------------
 
 def get_llm_response(user_query, data_context):
@@ -93,7 +94,7 @@ def get_llm_response(user_query, data_context):
     - {"operation": "top_n", "column": "column_name", "n": 5}
     - {"operation": "describe"}
 
-    Respond ONLY with the JSON block. Do not include conversational text."""
+    Respond ONLY with the JSON block. Do not include conversational text or explanations."""
 
     user_content = f"Data Context:\n{data_context}\n\nUser Question: {user_query}"
 
@@ -104,15 +105,26 @@ def get_llm_response(user_query, data_context):
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}]
         )
-        # Parse the JSON block from response text
-        op_json = json.loads(response.content[0].text.strip())
+        
+        raw_text = response.content.text.strip()
+        
+        # Strip out markdown formatting if Claude returned it
+        if raw_text.startswith("```"):
+            raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
+            raw_text = re.sub(r"\n```$", "", raw_text).strip()
+            
+        op_json = json.loads(raw_text)
         return op_json
+        
+    except json.JSONDecodeError:
+        st.error(f"Failed to parse JSON. Claude's raw response was:\n\n{response.content.text}")
+        return None
     except Exception as e:
         st.error(f"LLM Error: {e}")
         return None
 
 # ------------------------------------------------
-# STREAMLIT UI LAUNCH
+# STREAMLIT UI
 # ------------------------------------------------
 
 st.title("Excel AI Agent (Grounded)")
@@ -126,21 +138,23 @@ if uploaded_file:
         df = pd.read_excel(uploaded_file)
         
     st.session_state.dataframes["active"] = df
+    
+    st.subheader("Data Preview (First 5 Rows)")
     st.dataframe(df.head(5))
 
     user_query = st.text_input("Ask a question about your data:")
     if user_query:
         context = build_data_context(df)
         
-        with st.spinner("Analyzing data structure..."):
+        with st.spinner("Analyzing query and matching operation..."):
             operation = get_llm_response(user_query, context)
             
         if operation:
-            st.subheader("Executed Operation Parameters")
+            st.subheader("Extracted JSON Operation")
             st.json(operation)
             
-            with st.spinner("Running execution engine..."):
+            with st.spinner("Executing pandas engine..."):
                 result = run_pandas_operation(df, operation)
                 
-            st.subheader("Final Result")
+            st.subheader("Final Query Result")
             st.text(result)
