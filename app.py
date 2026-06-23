@@ -7,7 +7,7 @@ import json
 # CONFIG
 # ------------------------------------------------
 
-st.set_page_config(page_title="Excel AI Agent", layout="wide")
+st.set_page_config(page_title="Excel AI Agent (Grounded)", layout="wide")
 
 MODEL = "claude-haiku-4-5-20251001"
 
@@ -24,10 +24,32 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # ------------------------------------------------
-# SAFE PANDAS EXECUTOR
+# BUILD SAFE DATA CONTEXT (IMPORTANT FIX)
+# ------------------------------------------------
+
+def build_data_context(df):
+    return f"""
+DATASET STRUCTURE:
+
+Columns:
+{list(df.columns)}
+
+Column Types:
+{df.dtypes.to_string()}
+
+Sample Rows (VERY IMPORTANT):
+{df.head(10).to_string(index=False)}
+
+Row Count: {len(df)}
+"""
+
+
+# ------------------------------------------------
+# SAFE EXECUTOR (ONLY ALLOWED OPS)
 # ------------------------------------------------
 
 def run_pandas_operation(df, op):
+
     try:
         operation = op.get("operation")
 
@@ -46,51 +68,65 @@ def run_pandas_operation(df, op):
         if operation == "describe":
             return df.describe(include="all")
 
-        return f"Unknown operation: {operation}"
+        return "ERROR: Unsupported operation"
 
     except Exception as e:
         return f"Execution error: {e}"
 
+
 # ------------------------------------------------
-# CLAUDE PLANNER (STRICT JSON FIXED)
+# CLAUDE PLANNER (STRICT + GROUNDED)
 # ------------------------------------------------
 
-def get_plan(question, df_columns):
+def get_plan(question, df):
 
     system_prompt = f"""
-You are a STRICT JSON generator.
+You are a STRICT data analysis planner.
 
-Return ONLY valid JSON.
+You MUST follow these rules:
+- You can ONLY use the dataset columns provided
+- NEVER assume extra columns exist
+- NEVER mention SQL
+- NEVER guess missing data
+- Output ONLY valid JSON
 
-NO markdown.
-NO explanation.
-NO extra text.
+DATASET INFO:
+Columns:
+{list(df.columns)}
 
-Supported operations:
-- groupby_sum
-- groupby_mean
-- filter_equals
-- top_n
-- describe
+Sample Data:
+{df.head(10).to_string(index=False)}
 
-Available columns:
-{list(df_columns)}
+SUPPORTED OPERATIONS:
 
-Rules:
-- Only use valid columns
-- Output JSON only
+1. groupby_sum
+2. groupby_mean
+3. filter_equals
+4. top_n
+5. describe
 
-Example:
+JSON FORMAT ONLY:
+
+Examples:
+
+User: total sales by month
 {{
   "operation": "groupby_sum",
   "group": "month",
   "column": "sales"
 }}
+
+User: top 5 customers by revenue
+{{
+  "operation": "top_n",
+  "column": "revenue",
+  "n": 5
+}}
 """
 
     response = client.messages.create(
         model=MODEL,
-        max_tokens=300,
+        max_tokens=400,
         temperature=0,
         system=system_prompt,
         messages=[{"role": "user", "content": question}]
@@ -101,13 +137,12 @@ Example:
         text = text.replace("```json", "").replace("```", "").strip()
         return json.loads(text)
 
-    except Exception as e:
-        st.error("❌ Could not generate plan from Claude")
-        st.write("RAW OUTPUT:", response.content[0].text)
+    except:
         return None
 
+
 # ------------------------------------------------
-# CLAUDE EXPLAINER
+# CLAUDE EXPLAINER (NO HALLUCINATION RULES)
 # ------------------------------------------------
 
 def explain_result(question, result):
@@ -116,13 +151,24 @@ def explain_result(question, result):
         model=MODEL,
         max_tokens=800,
         temperature=0.2,
-        system="You are an expert data analyst. Explain results clearly and give business insights.",
+        system="""
+You are a strict data analyst.
+
+RULES:
+- ONLY explain the computed result given
+- NEVER assume missing columns
+- NEVER mention SQL
+- If result is empty or invalid, say "No valid data found in dataset"
+- Do NOT hallucinate or guess
+
+Be concise and factual.
+""",
         messages=[{
             "role": "user",
             "content": f"""
 Question: {question}
 
-Result:
+Computed Result:
 {result}
 """
         }]
@@ -130,16 +176,17 @@ Result:
 
     return response.content[0].text
 
+
 # ------------------------------------------------
 # UI
 # ------------------------------------------------
 
-st.title("📊 Excel AI Agent (Stable Version)")
+st.title("📊 Excel AI Agent (Fully Grounded)")
 
 tab1, tab2 = st.tabs(["📥 Import", "🤖 Chat"])
 
 # ------------------------------------------------
-# IMPORT TAB
+# IMPORT
 # ------------------------------------------------
 
 with tab1:
@@ -157,10 +204,10 @@ with tab1:
             st.session_state.dataframes[file.name] = df
             st.success(f"✅ {file.name} uploaded successfully")
 
-    st.info(f"Total files uploaded: {len(st.session_state.dataframes)}")
+    st.info(f"Total files: {len(st.session_state.dataframes)}")
 
 # ------------------------------------------------
-# CHAT TAB
+# CHAT
 # ------------------------------------------------
 
 with tab2:
@@ -171,7 +218,7 @@ with tab2:
 
     df = list(st.session_state.dataframes.values())[0]
 
-    # show chat history
+    # chat history
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -188,22 +235,31 @@ with tab2:
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # -------------------------
-        # STEP 1: PLAN
-        # -------------------------
-        plan = get_plan(prompt, df.columns)
+        # ------------------------------------------------
+        # STEP 1: PLAN (GROUNDED)
+        # ------------------------------------------------
+
+        plan = get_plan(prompt, df)
 
         if not plan:
+            with st.chat_message("assistant"):
+                st.error("Could not understand question based on dataset.")
             st.stop()
 
-        # -------------------------
+        # ------------------------------------------------
         # STEP 2: EXECUTE
-        # -------------------------
+        # ------------------------------------------------
+
         result = run_pandas_operation(df, plan)
 
-        # -------------------------
+        # safety check
+        if result is None or str(result).strip() == "":
+            result = "No valid data found in dataset"
+
+        # ------------------------------------------------
         # STEP 3: EXPLAIN
-        # -------------------------
+        # ------------------------------------------------
+
         explanation = explain_result(prompt, result)
 
         with st.chat_message("assistant"):
