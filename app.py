@@ -11,7 +11,13 @@ st.set_page_config(page_title="Excel AI Agent (Grounded)", layout="wide")
 
 MODEL = "claude-haiku-4-5-20251001"
 
-client = Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY", ""))
+# CRITICAL FIX: Ensure the key exists before running to prevent empty string API crashes
+api_key = st.secrets.get("ANTHROPIC_API_KEY")
+if not api_key:
+    st.error("Missing ANTHROPIC_API_KEY in Streamlit secrets!")
+    st.stop()
+
+client = Anthropic(api_key=api_key)
 
 # ------------------------------------------------
 # SESSION STATE
@@ -24,7 +30,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # ------------------------------------------------
-# BUILD SAFE DATA CONTEXT (IMPORTANT FIX)
+# BUILD SAFE DATA CONTEXT
 # ------------------------------------------------
 
 def build_data_context(df):
@@ -37,235 +43,104 @@ Columns:
 Column Types:
 {df.dtypes.to_string()}
 
-Sample Rows (VERY IMPORTANT):
+Sample Rows:
 {df.head(10).to_string(index=False)}
 
 Row Count: {len(df)}
 """
-
 
 # ------------------------------------------------
 # SAFE EXECUTOR (ONLY ALLOWED OPS)
 # ------------------------------------------------
 
 def run_pandas_operation(df, op):
-
     try:
         operation = op.get("operation")
 
         if operation == "groupby_sum":
-            return df.groupby(op["group"])[op["column"]].sum()
+            res = df.groupby(op["group"])[op["column"]].sum()
+            return res.to_string() # Convert to string for safe printing/LLM context
 
         if operation == "groupby_mean":
-            return df.groupby(op["group"])[op["column"]].mean()
+            res = df.groupby(op["group"])[op["column"]].mean()
+            return res.to_string()
 
         if operation == "filter_equals":
-            return df[df[op["column"]] == op["value"]]
+            res = df[df[op["column"]] == op["value"]]
+            return res.head(20).to_string(index=False) # Limit rows returned to LLM
 
         if operation == "top_n":
-            return df.nlargest(op["n"], op["column"])
+            res = df.nlargest(op["n"], op["column"])
+            return res.to_string(index=False)
 
         if operation == "describe":
-            return df.describe(include="all")
+            return df.describe(include="all").to_string()
 
         return "ERROR: Unsupported operation"
 
     except Exception as e:
         return f"Execution error: {e}"
 
-
 # ------------------------------------------------
-# CLAUDE PLANNER (STRICT + GROUNDED)
+# CLAUDE PLANNER & EXECUTION (COMPLETED)
 # ------------------------------------------------
 
-def get_plan(question, df):
+def get_llm_response(user_query, data_context):
+    system_prompt = """You are an Excel AI Assistant. You must analyze data queries and output a specific JSON instruction matching one of these supported operations:
+    - {"operation": "groupby_sum", "group": "column_name", "column": "column_name"}
+    - {"operation": "groupby_mean", "group": "column_name", "column": "column_name"}
+    - {"operation": "filter_equals", "column": "column_name", "value": "target_value"}
+    - {"operation": "top_n", "column": "column_name", "n": 5}
+    - {"operation": "describe"}
 
-    system_prompt = f"""
-You are a STRICT data analysis planner.
+    Respond ONLY with the JSON block. Do not include conversational text."""
 
-You MUST follow these rules:
-- You can ONLY use the dataset columns provided
-- NEVER assume extra columns exist
-- NEVER mention SQL
-- NEVER guess missing data
-- Output ONLY valid JSON
-
-DATASET INFO:
-Columns:
-{list(df.columns)}
-
-Sample Data:
-{df.head(10).to_string(index=False)}
-
-SUPPORTED OPERATIONS:
-
-1. groupby_sum
-2. groupby_mean
-3. filter_equals
-4. top_n
-5. describe
-
-JSON FORMAT ONLY:
-
-Examples:
-
-User: total sales by month
-{{
-  "operation": "groupby_sum",
-  "group": "month",
-  "column": "sales"
-}}
-
-User: top 5 customers by revenue
-{{
-  "operation": "top_n",
-  "column": "revenue",
-  "n": 5
-}}
-"""
-
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=400,
-        temperature=0,
-        system=system_prompt,
-        messages=[{"role": "user", "content": question}]
-    )
+    user_content = f"Data Context:\n{data_context}\n\nUser Question: {user_query}"
 
     try:
-        text = response.content[0].text.strip()
-        text = text.replace("```json", "").replace("```", "").strip()
-        return json.loads(text)
-
-    except:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=1000,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_content}]
+        )
+        # Parse the JSON block from response text
+        op_json = json.loads(response.content[0].text.strip())
+        return op_json
+    except Exception as e:
+        st.error(f"LLM Error: {e}")
         return None
 
-
 # ------------------------------------------------
-# CLAUDE EXPLAINER (NO HALLUCINATION RULES)
-# ------------------------------------------------
-
-def explain_result(question, result):
-
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=800,
-        temperature=0.2,
-        system="""
-You are a strict data analyst.
-
-RULES:
-- ONLY explain the computed result given
-- NEVER assume missing columns
-- NEVER mention SQL
-- If result is empty or invalid, say "No valid data found in dataset"
-- Do NOT hallucinate or guess
-
-Be concise and factual.
-""",
-        messages=[{
-            "role": "user",
-            "content": f"""
-Question: {question}
-
-Computed Result:
-{result}
-"""
-        }]
-    )
-
-    return response.content[0].text
-
-
-# ------------------------------------------------
-# UI
+# STREAMLIT UI LAUNCH
 # ------------------------------------------------
 
-st.title("📊 Excel AI Agent (Fully Grounded)")
+st.title("Excel AI Agent (Grounded)")
 
-tab1, tab2 = st.tabs(["📥 Import", "🤖 Chat"])
+uploaded_file = st.file_uploader("Upload an Excel or CSV file", type=["csv", "xlsx"])
 
-# ------------------------------------------------
-# IMPORT
-# ------------------------------------------------
+if uploaded_file:
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
+        
+    st.session_state.dataframes["active"] = df
+    st.dataframe(df.head(5))
 
-with tab1:
-
-    uploaded_files = st.file_uploader(
-        "Upload Excel files",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True
-    )
-
-    if uploaded_files:
-
-        for file in uploaded_files:
-            df = pd.read_excel(file)
-            st.session_state.dataframes[file.name] = df
-            st.success(f"✅ {file.name} uploaded successfully")
-
-    st.info(f"Total files: {len(st.session_state.dataframes)}")
-
-# ------------------------------------------------
-# CHAT
-# ------------------------------------------------
-
-with tab2:
-
-    if not st.session_state.dataframes:
-        st.warning("Please upload Excel file first")
-        st.stop()
-
-    df = list(st.session_state.dataframes.values())[0]
-
-    # chat history
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    prompt = st.chat_input("Ask your Excel question...")
-
-    if prompt:
-
-        st.session_state.messages.append({
-            "role": "user",
-            "content": prompt
-        })
-
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # ------------------------------------------------
-        # STEP 1: PLAN (GROUNDED)
-        # ------------------------------------------------
-
-        plan = get_plan(prompt, df)
-
-        if not plan:
-            with st.chat_message("assistant"):
-                st.error("Could not understand question based on dataset.")
-            st.stop()
-
-        # ------------------------------------------------
-        # STEP 2: EXECUTE
-        # ------------------------------------------------
-
-        result = run_pandas_operation(df, plan)
-
-        # safety check
-        if result is None or str(result).strip() == "":
-            result = "No valid data found in dataset"
-
-        # ------------------------------------------------
-        # STEP 3: EXPLAIN
-        # ------------------------------------------------
-
-        explanation = explain_result(prompt, result)
-
-        with st.chat_message("assistant"):
-            st.markdown(explanation)
-
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": explanation
-        })
+    user_query = st.text_input("Ask a question about your data:")
+    if user_query:
+        context = build_data_context(df)
+        
+        with st.spinner("Analyzing data structure..."):
+            operation = get_llm_response(user_query, context)
+            
+        if operation:
+            st.subheader("Executed Operation Parameters")
+            st.json(operation)
+            
+            with st.spinner("Running execution engine..."):
+                result = run_pandas_operation(df, operation)
+                
+            st.subheader("Final Result")
+            st.text(result)
