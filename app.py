@@ -106,7 +106,8 @@ def get_llm_response(user_query, data_context):
             messages=[{"role": "user", "content": user_content}]
         )
         
-        raw_text = response.content.text.strip()
+        # FIXED: Extracting raw text from the first content block object in the response list
+        raw_text = response.content[0].text.strip()
         
         # Strip out markdown formatting if Claude returned it
         if raw_text.startswith("```"):
@@ -117,7 +118,7 @@ def get_llm_response(user_query, data_context):
         return op_json
         
     except json.JSONDecodeError:
-        st.error(f"Failed to parse JSON. Claude's raw response was:\n\n{response.content.text}")
+        st.error(f"Failed to parse JSON. Claude's raw response was:\n\n{response.content[0].text}")
         return None
     except Exception as e:
         st.error(f"LLM Error: {e}")
