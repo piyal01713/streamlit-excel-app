@@ -163,9 +163,10 @@ with tab1:
         st.session_state.dataframes[file.name] = df
         st.success(f"Loaded {file.name}")
 
-    for name, df in st.session_state.dataframes.items():
-        with st.expander(name):
-            st.dataframe(df.head(10))
+    for file in files:
+    df = pd.read_excel(file)
+    st.session_state.dataframes[file.name] = df
+    st.success(f"✅ {file.name} uploaded successfully")
 
 
 # ------------------------------------------------
