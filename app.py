@@ -51,9 +51,8 @@ def run_pandas_operation(df, op):
     except Exception as e:
         return f"Execution error: {e}"
 
-
 # ------------------------------------------------
-# CLAUDE PLANNER (FIXED JSON VERSION)
+# CLAUDE PLANNER (STRICT JSON FIXED)
 # ------------------------------------------------
 
 def get_plan(question, df_columns):
@@ -65,9 +64,7 @@ Return ONLY valid JSON.
 
 NO markdown.
 NO explanation.
-NO text before or after JSON.
-
-If invalid → system fails.
+NO extra text.
 
 Supported operations:
 - groupby_sum
@@ -76,12 +73,12 @@ Supported operations:
 - top_n
 - describe
 
-Columns:
+Available columns:
 {list(df_columns)}
 
 Rules:
-- Use only available columns
-- Output must be JSON only
+- Only use valid columns
+- Output JSON only
 
 Example:
 {{
@@ -101,17 +98,13 @@ Example:
 
     try:
         text = response.content[0].text.strip()
-
-        # clean accidental formatting
         text = text.replace("```json", "").replace("```", "").strip()
-
         return json.loads(text)
 
     except Exception as e:
-        st.error("Could not parse Claude plan")
+        st.error("❌ Could not generate plan from Claude")
         st.write("RAW OUTPUT:", response.content[0].text)
         return None
-
 
 # ------------------------------------------------
 # CLAUDE EXPLAINER
@@ -123,7 +116,7 @@ def explain_result(question, result):
         model=MODEL,
         max_tokens=800,
         temperature=0.2,
-        system="You are an expert data analyst. Explain results clearly and provide business insights.",
+        system="You are an expert data analyst. Explain results clearly and give business insights.",
         messages=[{
             "role": "user",
             "content": f"""
@@ -137,50 +130,48 @@ Result:
 
     return response.content[0].text
 
-
 # ------------------------------------------------
 # UI
 # ------------------------------------------------
 
-st.title("📊 Excel AI Agent (Stable v2.1)")
+st.title("📊 Excel AI Agent (Stable Version)")
 
 tab1, tab2 = st.tabs(["📥 Import", "🤖 Chat"])
 
 # ------------------------------------------------
-# IMPORT
+# IMPORT TAB
 # ------------------------------------------------
 
 with tab1:
 
-    files = st.file_uploader(
+    uploaded_files = st.file_uploader(
         "Upload Excel files",
         type=["xlsx", "xls"],
         accept_multiple_files=True
     )
 
-    for file in files:
-        df = pd.read_excel(file)
-        st.session_state.dataframes[file.name] = df
-        st.success(f"Loaded {file.name}")
+    if uploaded_files:
 
-    for file in files:
-    df = pd.read_excel(file)
-    st.session_state.dataframes[file.name] = df
-    st.success(f"✅ {file.name} uploaded successfully")
+        for file in uploaded_files:
+            df = pd.read_excel(file)
+            st.session_state.dataframes[file.name] = df
+            st.success(f"✅ {file.name} uploaded successfully")
 
+    st.info(f"Total files uploaded: {len(st.session_state.dataframes)}")
 
 # ------------------------------------------------
-# CHAT
+# CHAT TAB
 # ------------------------------------------------
 
 with tab2:
 
     if not st.session_state.dataframes:
-        st.warning("Upload Excel first")
+        st.warning("Please upload Excel file first")
         st.stop()
 
     df = list(st.session_state.dataframes.values())[0]
 
+    # show chat history
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -197,22 +188,22 @@ with tab2:
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # -------------------------------
+        # -------------------------
         # STEP 1: PLAN
-        # -------------------------------
+        # -------------------------
         plan = get_plan(prompt, df.columns)
 
         if not plan:
             st.stop()
 
-        # -------------------------------
+        # -------------------------
         # STEP 2: EXECUTE
-        # -------------------------------
+        # -------------------------
         result = run_pandas_operation(df, plan)
 
-        # -------------------------------
+        # -------------------------
         # STEP 3: EXPLAIN
-        # -------------------------------
+        # -------------------------
         explanation = explain_result(prompt, result)
 
         with st.chat_message("assistant"):
