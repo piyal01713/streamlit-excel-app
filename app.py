@@ -24,41 +24,25 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # ------------------------------------------------
-# SAFE TOOL LAYER (PANDAS EXECUTOR)
+# SAFE PANDAS EXECUTOR
 # ------------------------------------------------
 
 def run_pandas_operation(df, op):
-    """
-    Safe execution layer (NO raw Python execution)
-    """
-
     try:
         operation = op.get("operation")
 
-        # -------------------------
-        # GROUPBY
-        # -------------------------
         if operation == "groupby_sum":
             return df.groupby(op["group"])[op["column"]].sum()
 
         if operation == "groupby_mean":
             return df.groupby(op["group"])[op["column"]].mean()
 
-        # -------------------------
-        # FILTER
-        # -------------------------
         if operation == "filter_equals":
             return df[df[op["column"]] == op["value"]]
 
-        # -------------------------
-        # TOP N
-        # -------------------------
         if operation == "top_n":
             return df.nlargest(op["n"], op["column"])
 
-        # -------------------------
-        # DESCRIBE
-        # -------------------------
         if operation == "describe":
             return df.describe(include="all")
 
@@ -69,49 +53,41 @@ def run_pandas_operation(df, op):
 
 
 # ------------------------------------------------
-# CLAUDE PLANNER (STEP 1)
+# CLAUDE PLANNER (FIXED JSON VERSION)
 # ------------------------------------------------
 
 def get_plan(question, df_columns):
-    """
-    Claude converts natural language → structured JSON
-    """
 
     system_prompt = f"""
-You are a data analyst planner.
+You are a STRICT JSON generator.
 
-Convert user questions into structured JSON operations.
+Return ONLY valid JSON.
 
-Available columns:
+NO markdown.
+NO explanation.
+NO text before or after JSON.
+
+If invalid → system fails.
+
+Supported operations:
+- groupby_sum
+- groupby_mean
+- filter_equals
+- top_n
+- describe
+
+Columns:
 {list(df_columns)}
 
 Rules:
-- ONLY output valid JSON
-- No explanations
-- No markdown
+- Use only available columns
+- Output must be JSON only
 
-Supported operations:
-
-1. groupby_sum
-2. groupby_mean
-3. filter_equals
-4. top_n
-5. describe
-
-Format examples:
-
-User: total sales by month
+Example:
 {{
   "operation": "groupby_sum",
   "group": "month",
   "column": "sales"
-}}
-
-User: top 5 customers by revenue
-{{
-  "operation": "top_n",
-  "column": "revenue",
-  "n": 5
 }}
 """
 
@@ -124,36 +100,39 @@ User: top 5 customers by revenue
     )
 
     try:
-        return json.loads(response.content[0].text)
-    except:
+        text = response.content[0].text.strip()
+
+        # clean accidental formatting
+        text = text.replace("```json", "").replace("```", "").strip()
+
+        return json.loads(text)
+
+    except Exception as e:
+        st.error("Could not parse Claude plan")
+        st.write("RAW OUTPUT:", response.content[0].text)
         return None
 
 
 # ------------------------------------------------
-# CLAUDE EXPLAINER (STEP 3)
+# CLAUDE EXPLAINER
 # ------------------------------------------------
 
 def explain_result(question, result):
-    """
-    Claude turns computed output into insights
-    """
 
     response = client.messages.create(
         model=MODEL,
         max_tokens=800,
         temperature=0.2,
         system="You are an expert data analyst. Explain results clearly and provide business insights.",
-        messages=[
-            {
-                "role": "user",
-                "content": f"""
+        messages=[{
+            "role": "user",
+            "content": f"""
 Question: {question}
 
 Result:
 {result}
 """
-            }
-        ]
+        }]
     )
 
     return response.content[0].text
@@ -163,7 +142,7 @@ Result:
 # UI
 # ------------------------------------------------
 
-st.title("📊 Excel AI Agent (v2)")
+st.title("📊 Excel AI Agent (Stable v2.1)")
 
 tab1, tab2 = st.tabs(["📥 Import", "🤖 Chat"])
 
@@ -174,7 +153,7 @@ tab1, tab2 = st.tabs(["📥 Import", "🤖 Chat"])
 with tab1:
 
     files = st.file_uploader(
-        "Upload Excel",
+        "Upload Excel files",
         type=["xlsx", "xls"],
         accept_multiple_files=True
     )
@@ -187,6 +166,7 @@ with tab1:
     for name, df in st.session_state.dataframes.items():
         with st.expander(name):
             st.dataframe(df.head(10))
+
 
 # ------------------------------------------------
 # CHAT
@@ -217,21 +197,20 @@ with tab2:
             st.markdown(prompt)
 
         # -------------------------------
-        # STEP 1: PLAN (Claude)
+        # STEP 1: PLAN
         # -------------------------------
         plan = get_plan(prompt, df.columns)
 
         if not plan:
-            st.error("Could not generate plan")
             st.stop()
 
         # -------------------------------
-        # STEP 2: EXECUTE (Python safe layer)
+        # STEP 2: EXECUTE
         # -------------------------------
         result = run_pandas_operation(df, plan)
 
         # -------------------------------
-        # STEP 3: EXPLAIN (Claude)
+        # STEP 3: EXPLAIN
         # -------------------------------
         explanation = explain_result(prompt, result)
 
