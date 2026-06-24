@@ -108,4 +108,110 @@ with st.sidebar:
     st.header("1. Load Data")
     input_method = st.radio("Source:", ["Upload File", "Cloud Link"])
     
-    raw_
+    raw_data = None
+    if input_method == "Upload File":
+        uploaded_file = st.file_uploader("Upload XLSX", type=["xlsx"])
+        if uploaded_file: 
+            raw_data = uploaded_file.read()
+    else:
+        url_input = st.text_input("Paste Shareable Link:")
+        if url_input:
+            with st.spinner("Connecting..."):
+                dl_link = get_direct_download_link(url_input)
+                try:
+                    res = requests.get(dl_link, timeout=15)
+                    raw_data = res.content
+                except Exception as e:
+                    st.error(f"Link Error: {e}")
+
+    if raw_data:
+        try:
+            # Load with openpyxl to detect frozen rows (read_only=False required for panes)
+            wb = openpyxl.load_workbook(io.BytesIO(raw_data), data_only=True, read_only=False)
+            temp_dfs = {}
+
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                header_idx = 0 
+                
+                # Check 1: freeze_panes attribute (e.g. 'A2')
+                freeze = ws.freeze_panes
+                
+                # Check 2: Sheet views for ySplit (number of frozen rows)
+                y_split = 0
+                try:
+                    # Robust check for SheetViewList objects
+                    if hasattr(ws, 'views') and ws.views:
+                        view = ws.views[0]
+                        if hasattr(view, 'pane') and view.pane is not None:
+                            y_split = view.pane.ySplit or 0
+                except (AttributeError, TypeError, IndexError):
+                    y_split = 0
+
+                if freeze and freeze != 'A1':
+                    row_match = re.search(r'\d+', str(freeze))
+                    if row_match:
+                        # If row 2 is frozen (A2), row 1 (index 0) is likely the header
+                        header_idx = int(row_match.group()) - 2
+                elif y_split > 0:
+                    # If 1 row is frozen via ySplit, index 0 is the header
+                    header_idx = int(y_split) - 1
+                
+                header_idx = max(0, header_idx)
+                
+                # Parse sheet using detected header index
+                df = pd.read_excel(io.BytesIO(raw_data), sheet_name=sheet_name, header=header_idx)
+                temp_dfs[sheet_name] = df
+
+            st.session_state.all_dfs = temp_dfs
+            st.success("File Loaded successfully!")
+        except Exception as e:
+            st.error(f"Read Error: {e}")
+
+    if st.session_state.all_dfs:
+        st.session_state.scope = st.selectbox("Scope:", ["Analyze All Sheets (Join/Compare)"] + list(st.session_state.all_dfs.keys()))
+
+# MAIN INTERFACE
+if st.session_state.all_dfs:
+    with st.expander("👀 View Data Preview"):
+        if st.session_state.scope == "Analyze All Sheets (Join/Compare)":
+            for name, df in st.session_state.all_dfs.items():
+                st.markdown(f"**Sheet:** `{name}`")
+                st.dataframe(df.head(3))
+        else:
+            st.dataframe(st.session_state.all_dfs[st.session_state.scope])
+
+    with st.form("chat_form"):
+        user_query = st.text_input("Ask a question about your data:")
+        submitted = st.form_submit_button("Analyze")
+
+    if submitted and user_query:
+        context = build_context(st.session_state.all_dfs, st.session_state.scope)
+        with st.spinner("Processing..."):
+            code = get_analysis_code(user_query, context)
+            if code:
+                try:
+                    # Logic execution
+                    exec_globals = {'pd': pd, 'dfs': st.session_state.all_dfs}
+                    exec_locals = {}
+                    exec(code, exec_globals, exec_locals)
+                    calc_res = exec_locals.get('result', "No result variable created.")
+                    
+                    # Generate natural answer
+                    answer = generate_natural_answer(user_query, calc_res)
+                    st.markdown("### 💡 Result")
+                    st.markdown(answer)
+                    
+                    # Data display
+                    if isinstance(calc_res, (pd.DataFrame, pd.Series)):
+                        st.dataframe(calc_res)
+                    else:
+                        st.write(calc_res)
+                        
+                    with st.expander("Technical Logic"):
+                        st.code(code)
+                except Exception as e:
+                    st.error(f"Execution Error: {e}")
+                    st.code(code)
+else:
+    st.info("Upload an Excel file in the sidebar to begin.")
