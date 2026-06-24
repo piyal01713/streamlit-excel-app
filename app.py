@@ -3,6 +3,7 @@ import streamlit as st
 from anthropic import Anthropic
 import json
 import re
+import base64  # Needed for OneDrive URL conversion
 
 # ------------------------------------------------
 # CONFIG
@@ -18,6 +19,31 @@ if not api_key:
     st.stop()
 
 client = Anthropic(api_key=api_key)
+
+# ------------------------------------------------
+# HELPERS: URL CONVERSION
+# ------------------------------------------------
+
+def get_direct_download_link(url):
+    """Detects provider and converts sharing link to direct download link."""
+    try:
+        # Google Drive
+        if "drive.google.com" in url:
+            # Extract file ID
+            file_id_match = re.search(r'd/([^/]+)', url)
+            if file_id_match:
+                return f'https://drive.google.com/uc?export=download&id={file_id_match.group(1)}'
+        
+        # OneDrive (Personal)
+        elif "1drv.ms" in url or "onedrive.live.com" in url:
+            # OneDrive requires base64 encoding the share URL
+            base64_url = base64.b64encode(url.encode()).decode().replace('+', '-').replace('/', '_').rstrip('=')
+            return f"https://api.onedrive.com/v1.0/shares/u!{base64_url}/root/content"
+            
+        return url # Return as is if it doesn't match known cloud patterns
+    except Exception as e:
+        st.error(f"Error parsing URL: {e}")
+        return None
 
 # ------------------------------------------------
 # SESSION STATE
@@ -47,7 +73,7 @@ Row Count: {len(df)}
 """
 
 # ------------------------------------------------
-# SAFE EXECUTOR (WITH STRING_CONTAINS)
+# SAFE EXECUTOR
 # ------------------------------------------------
 
 def run_pandas_operation(df, op):
@@ -107,7 +133,6 @@ def get_llm_response(user_query, data_context):
             messages=[{"role": "user", "content": user_content}]
         )
         
-        # CRITICAL FIX 1: Extract text from index 0
         raw_text = response.content[0].text.strip()
         
         if raw_text.startswith("```"):
@@ -117,9 +142,6 @@ def get_llm_response(user_query, data_context):
         op_json = json.loads(raw_text)
         return op_json
         
-    except json.JSONDecodeError:
-        st.error(f"Failed to parse JSON. Claude's raw response was:\n\n{response.content[0].text}")
-        return None
     except Exception as e:
         st.error(f"LLM Error in Planner: {e}")
         return None
@@ -136,7 +158,6 @@ def generate_natural_answer(user_query, execution_result):
             system="You are a helpful data assistant. Use the provided raw dataset results to directly, cleanly, and naturally answer the user's question. Formulate a polite response. Do not output python code.",
             messages=[{"role": "user", "content": f"User asked: {user_query}\n\nData engine returned this result:\n{execution_result}"}]
         )
-        # CRITICAL FIX 2: Extract text from index 0
         return response.content[0].text
     except Exception as e:
         return f"Could not generate conversational answer due to an error: {e}"
@@ -147,14 +168,40 @@ def generate_natural_answer(user_query, execution_result):
 
 st.title("Excel AI Agent (Grounded)")
 
-uploaded_file = st.file_uploader("Upload an Excel or CSV file", type=["csv", "xlsx"])
+# Sidebar for Input Methods
+with st.sidebar:
+    st.header("Data Source")
+    input_method = st.radio("Choose input method:", ["Upload File", "Link (GDrive/OneDrive)"])
+    
+    df = None
 
-if uploaded_file:
-    if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
+    if input_method == "Upload File":
+        uploaded_file = st.file_uploader("Upload an Excel or CSV file", type=["csv", "xlsx"])
+        if uploaded_file:
+            try:
+                if uploaded_file.name.endswith(".csv"):
+                    df = pd.read_csv(uploaded_file)
+                else:
+                    df = pd.read_excel(uploaded_file)
+            except Exception as e:
+                st.error(f"Error loading file: {e}")
+
     else:
-        df = pd.read_excel(uploaded_file)
-        
+        url_input = st.text_input("Paste Shareable Link:", placeholder="https://drive.google.com/...")
+        if url_input:
+            with st.spinner("Fetching cloud file..."):
+                direct_link = get_direct_download_link(url_input)
+                try:
+                    # Note: We try reading as Excel first for cloud links
+                    df = pd.read_excel(direct_link)
+                except:
+                    try:
+                        df = pd.read_csv(direct_link)
+                    except Exception as e:
+                        st.error("Could not read file from link. Ensure the link is public ('Anyone with the link').")
+
+# MAIN AREA
+if df is not None:
     st.session_state.dataframes["active"] = df
     
     st.subheader("Data Preview (First 5 Rows)")
@@ -164,15 +211,20 @@ if uploaded_file:
     if user_query:
         context = build_data_context(df)
         
-        with st.spinner("Analyzing query and parsing operations..."):
+        with st.spinner("Analyzing query..."):
             operation = get_llm_response(user_query, context)
             
         if operation:
-            with st.spinner("Running secure data lookup engine..."):
+            with st.spinner("Executing data operations..."):
                 result = run_pandas_operation(df, operation)
                 
-            with st.spinner("Synthesizing final natural language answer..."):
+            with st.spinner("Generating answer..."):
                 conversational_answer = generate_natural_answer(user_query, result)
                 
             st.subheader("Assistant Response")
-            st.write(conversational_answer)
+            st.info(conversational_answer)
+            with st.expander("View Raw Data Operation"):
+                st.json(operation)
+                st.text(result)
+else:
+    st.info("Please upload a file or provide a link in the sidebar to begin.")
