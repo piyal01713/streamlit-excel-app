@@ -14,8 +14,8 @@ import openpyxl
 
 st.set_page_config(page_title="Excel Insights", layout="wide")
 
-# Ensure this is the correct model ID
-MODEL = "claude-haiku-4-5-20251001" 
+# Correct model ID for Claude 3.5 Haiku
+MODEL = "claude-3-5-haiku-20241022" 
 
 if 'all_dfs' not in st.session_state:
     st.session_state.all_dfs = None
@@ -71,8 +71,7 @@ def get_analysis_code(user_query, context):
     system_prompt = (
         "You are a Python data expert. Write code for a dictionary of DataFrames named `dfs`. "
         "The final result MUST be in a variable named `result`. "
-        "Search all rows and columns for value matches. "
-        "RESPOND ONLY WITH CODE."
+        "Search all rows and columns for value matches. RESPOND ONLY WITH CODE."
     )
     try:
         response = client.messages.create(
@@ -87,12 +86,7 @@ def get_analysis_code(user_query, context):
         return None
 
 def generate_natural_answer(user_query, execution_result):
-    clean_system_prompt = (
-        "You are a concise data assistant. Summarize the data result clearly.\n"
-        "1. No preamble.\n"
-        "2. Use **bolding** for key values.\n"
-        "3. Use bullet points.\n"
-    )
+    clean_system_prompt = "You are a concise data assistant. Summarize the data result clearly using bolding and bullets."
     try:
         response = client.messages.create(
             model=MODEL,
@@ -132,7 +126,7 @@ with st.sidebar:
 
     if raw_data:
         try:
-            # Detect Frozen Headers
+            # Open with openpyxl to check for frozen rows
             wb = openpyxl.load_workbook(io.BytesIO(raw_data), data_only=True, read_only=False)
             temp_dfs = {}
 
@@ -140,10 +134,10 @@ with st.sidebar:
                 ws = wb[sheet_name]
                 header_idx = 0 
                 
-                # Method 1: Standard freeze_panes
+                # Check freeze_panes ('A2' etc)
                 freeze = ws.freeze_panes
                 
-                # Method 2: Sheet Views (ySplit)
+                # Check ySplit (number of rows frozen)
                 y_split = 0
                 if hasattr(ws, 'views') and len(ws.views) > 0:
                     if ws.views[0].pane is not None:
@@ -152,13 +146,15 @@ with st.sidebar:
                 if freeze and freeze != 'A1':
                     row_match = re.search(r'\d+', str(freeze))
                     if row_match:
+                        # If A2 is frozen, index 0 is header
                         header_idx = int(row_match.group()) - 2
                 elif y_split > 0:
+                    # If 1 row is frozen, index 0 is header
                     header_idx = int(y_split) - 1
                 
                 header_idx = max(0, header_idx)
                 
-                # Parse sheet
+                # Load sheet with detected header
                 df = pd.read_excel(io.BytesIO(raw_data), sheet_name=sheet_name, header=header_idx)
                 temp_dfs[sheet_name] = df
 
@@ -171,32 +167,4 @@ with st.sidebar:
         st.session_state.scope = st.selectbox("Scope:", ["Analyze All Sheets (Join/Compare)"] + list(st.session_state.all_dfs.keys()))
 
 # MAIN INTERFACE
-if st.session_state.all_dfs:
-    with st.expander("👀 View Data Preview"):
-        if st.session_state.scope == "Analyze All Sheets (Join/Compare)":
-            for name, df in st.session_state.all_dfs.items():
-                st.markdown(f"**Sheet:** `{name}`")
-                st.dataframe(df.head(3))
-        else:
-            st.dataframe(st.session_state.all_dfs[st.session_state.scope])
-
-    with st.form("chat_form"):
-        user_query = st.text_input("Ask a question about your data:")
-        submitted = st.form_submit_button("Analyze")
-
-    if submitted and user_query:
-        context = build_context(st.session_state.all_dfs, st.session_state.scope)
-        with st.spinner("Processing..."):
-            code = get_analysis_code(user_query, context)
-            if code:
-                try:
-                    exec_globals = {'pd': pd, 'dfs': st.session_state.all_dfs}
-                    exec_locals = {}
-                    exec(code, exec_globals, exec_locals)
-                    calc_res = exec_locals.get('result', "No result variable was created.")
-                    
-                    answer = generate_natural_answer(user_query, calc_res)
-                    st.markdown("### 💡 Result")
-                    st.markdown(answer)
-                    
-                    if isinstance(calc_res, (
+if st.sessio
