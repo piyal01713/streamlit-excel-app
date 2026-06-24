@@ -14,7 +14,7 @@ import openpyxl
 
 st.set_page_config(page_title="Excel Insights", layout="wide")
 
-# Using your specific model ID
+# Ensure this is the correct model ID
 MODEL = "claude-haiku-4-5-20251001" 
 
 if 'all_dfs' not in st.session_state:
@@ -48,7 +48,7 @@ def get_direct_download_link(url):
             encoded_url = base64.b64encode(url.encode()).decode().replace('+', '-').replace('/', '_').rstrip('=')
             return f"https://api.onedrive.com/v1.0/shares/u!{encoded_url}/root/content"
         return url
-    except:
+    except Exception:
         return url
 
 def build_context(dfs_dict, scope):
@@ -72,8 +72,131 @@ def get_analysis_code(user_query, context):
         "You are a Python data expert. Write code for a dictionary of DataFrames named `dfs`. "
         "The final result MUST be in a variable named `result`. "
         "Search all rows and columns for value matches. "
-        "If column names contain 'Unnamed', the code should attempt to find the correct data dynamically. "
         "RESPOND ONLY WITH CODE."
     )
     try:
-        res
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=1000,
+            system=system_prompt,
+            messages=[{"role": "user", "content": f"Context:\n{context}\n\nQuery: {user_query}"}]
+        )
+        return re.sub(r"```python\n|```", "", response.content[0].text.strip())
+    except Exception as e:
+        st.error(f"AI Error: {e}")
+        return None
+
+def generate_natural_answer(user_query, execution_result):
+    clean_system_prompt = (
+        "You are a concise data assistant. Summarize the data result clearly.\n"
+        "1. No preamble.\n"
+        "2. Use **bolding** for key values.\n"
+        "3. Use bullet points.\n"
+    )
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=500,
+            system=clean_system_prompt,
+            messages=[{"role": "user", "content": f"User: {user_query}\nResult: {execution_result}"}]
+        )
+        return response.content[0].text
+    except Exception:
+        return f"Result: {execution_result}"
+
+# ------------------------------------------------
+# STREAMLIT UI
+# ------------------------------------------------
+
+st.title("📊 Excel Insights")
+
+with st.sidebar:
+    st.header("1. Load Data")
+    input_method = st.radio("Source:", ["Upload File", "Cloud Link"])
+    
+    raw_data = None
+    if input_method == "Upload File":
+        uploaded_file = st.file_uploader("Upload XLSX", type=["xlsx"])
+        if uploaded_file: 
+            raw_data = uploaded_file.read()
+    else:
+        url_input = st.text_input("Paste Shareable Link:")
+        if url_input:
+            with st.spinner("Connecting..."):
+                dl_link = get_direct_download_link(url_input)
+                try:
+                    res = requests.get(dl_link, timeout=15)
+                    raw_data = res.content
+                except Exception as e:
+                    st.error(f"Link Error: {e}")
+
+    if raw_data:
+        try:
+            # Detect Frozen Headers
+            wb = openpyxl.load_workbook(io.BytesIO(raw_data), data_only=True, read_only=False)
+            temp_dfs = {}
+
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                header_idx = 0 
+                
+                # Method 1: Standard freeze_panes
+                freeze = ws.freeze_panes
+                
+                # Method 2: Sheet Views (ySplit)
+                y_split = 0
+                if hasattr(ws, 'views') and len(ws.views) > 0:
+                    if ws.views[0].pane is not None:
+                        y_split = ws.views[0].pane.ySplit or 0
+
+                if freeze and freeze != 'A1':
+                    row_match = re.search(r'\d+', str(freeze))
+                    if row_match:
+                        header_idx = int(row_match.group()) - 2
+                elif y_split > 0:
+                    header_idx = int(y_split) - 1
+                
+                header_idx = max(0, header_idx)
+                
+                # Parse sheet
+                df = pd.read_excel(io.BytesIO(raw_data), sheet_name=sheet_name, header=header_idx)
+                temp_dfs[sheet_name] = df
+
+            st.session_state.all_dfs = temp_dfs
+            st.success("File Loaded!")
+        except Exception as e:
+            st.error(f"Read Error: {e}")
+
+    if st.session_state.all_dfs:
+        st.session_state.scope = st.selectbox("Scope:", ["Analyze All Sheets (Join/Compare)"] + list(st.session_state.all_dfs.keys()))
+
+# MAIN INTERFACE
+if st.session_state.all_dfs:
+    with st.expander("👀 View Data Preview"):
+        if st.session_state.scope == "Analyze All Sheets (Join/Compare)":
+            for name, df in st.session_state.all_dfs.items():
+                st.markdown(f"**Sheet:** `{name}`")
+                st.dataframe(df.head(3))
+        else:
+            st.dataframe(st.session_state.all_dfs[st.session_state.scope])
+
+    with st.form("chat_form"):
+        user_query = st.text_input("Ask a question about your data:")
+        submitted = st.form_submit_button("Analyze")
+
+    if submitted and user_query:
+        context = build_context(st.session_state.all_dfs, st.session_state.scope)
+        with st.spinner("Processing..."):
+            code = get_analysis_code(user_query, context)
+            if code:
+                try:
+                    exec_globals = {'pd': pd, 'dfs': st.session_state.all_dfs}
+                    exec_locals = {}
+                    exec(code, exec_globals, exec_locals)
+                    calc_res = exec_locals.get('result', "No result variable was created.")
+                    
+                    answer = generate_natural_answer(user_query, calc_res)
+                    st.markdown("### 💡 Result")
+                    st.markdown(answer)
+                    
+                    if isinstance(calc_res, (
