@@ -126,7 +126,7 @@ with st.sidebar:
 
     if raw_data:
         try:
-            # Open with openpyxl (read_only=False) to detect headers/frozen panes
+            # Load with openpyxl to detect frozen rows
             wb = openpyxl.load_workbook(io.BytesIO(raw_data), data_only=True, read_only=False)
             temp_dfs = {}
 
@@ -134,12 +134,19 @@ with st.sidebar:
                 ws = wb[sheet_name]
                 header_idx = 0 
                 
-                # Check for frozen panes
+                # Check 1: freeze_panes attribute
                 freeze = ws.freeze_panes
+                
+                # Check 2: Sheet views for ySplit (number of frozen rows)
                 y_split = 0
-                if hasattr(ws, 'views') and len(ws.views) > 0:
-                    if ws.views[0].pane is not None:
-                        y_split = ws.views[0].pane.ySplit or 0
+                try:
+                    # Safely access views without using len()
+                    if ws.views:
+                        view = ws.views[0]
+                        if view.pane is not None:
+                            y_split = view.pane.ySplit or 0
+                except (AttributeError, TypeError, IndexError):
+                    y_split = 0
 
                 if freeze and freeze != 'A1':
                     row_match = re.search(r'\d+', str(freeze))
@@ -147,11 +154,12 @@ with st.sidebar:
                         # If row 2 is frozen (A2), row 1 (index 0) is header
                         header_idx = int(row_match.group()) - 2
                 elif y_split > 0:
+                    # If 1 row is frozen, index 0 is header
                     header_idx = int(y_split) - 1
                 
                 header_idx = max(0, header_idx)
                 
-                # Re-parse this specific sheet with the detected header
+                # Parse sheet using detected header index
                 df = pd.read_excel(io.BytesIO(raw_data), sheet_name=sheet_name, header=header_idx)
                 temp_dfs[sheet_name] = df
 
