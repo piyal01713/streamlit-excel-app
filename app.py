@@ -86,7 +86,7 @@ def get_analysis_code(user_query, context):
         return None
 
 def generate_natural_answer(user_query, execution_result):
-    clean_system_prompt = "You are a concise data assistant. Summarize the data result clearly using bolding and bullets."
+    clean_system_prompt = "You are a concise data assistant. Summarize the result clearly using bolding and bullets."
     try:
         response = client.messages.create(
             model=MODEL,
@@ -126,7 +126,7 @@ with st.sidebar:
 
     if raw_data:
         try:
-            # Open with openpyxl to check for frozen rows
+            # Open with openpyxl (read_only=False) to detect headers/frozen panes
             wb = openpyxl.load_workbook(io.BytesIO(raw_data), data_only=True, read_only=False)
             temp_dfs = {}
 
@@ -134,10 +134,8 @@ with st.sidebar:
                 ws = wb[sheet_name]
                 header_idx = 0 
                 
-                # Check freeze_panes ('A2' etc)
+                # Check for frozen panes
                 freeze = ws.freeze_panes
-                
-                # Check ySplit (number of rows frozen)
                 y_split = 0
                 if hasattr(ws, 'views') and len(ws.views) > 0:
                     if ws.views[0].pane is not None:
@@ -146,20 +144,19 @@ with st.sidebar:
                 if freeze and freeze != 'A1':
                     row_match = re.search(r'\d+', str(freeze))
                     if row_match:
-                        # If A2 is frozen, index 0 is header
+                        # If row 2 is frozen (A2), row 1 (index 0) is header
                         header_idx = int(row_match.group()) - 2
                 elif y_split > 0:
-                    # If 1 row is frozen, index 0 is header
                     header_idx = int(y_split) - 1
                 
                 header_idx = max(0, header_idx)
                 
-                # Load sheet with detected header
+                # Re-parse this specific sheet with the detected header
                 df = pd.read_excel(io.BytesIO(raw_data), sheet_name=sheet_name, header=header_idx)
                 temp_dfs[sheet_name] = df
 
             st.session_state.all_dfs = temp_dfs
-            st.success("File Loaded!")
+            st.success("File Loaded successfully!")
         except Exception as e:
             st.error(f"Read Error: {e}")
 
@@ -167,4 +164,46 @@ with st.sidebar:
         st.session_state.scope = st.selectbox("Scope:", ["Analyze All Sheets (Join/Compare)"] + list(st.session_state.all_dfs.keys()))
 
 # MAIN INTERFACE
-if st.sessio
+if st.session_state.all_dfs:
+    with st.expander("👀 View Data Preview"):
+        if st.session_state.scope == "Analyze All Sheets (Join/Compare)":
+            for name, df in st.session_state.all_dfs.items():
+                st.markdown(f"**Sheet:** `{name}`")
+                st.dataframe(df.head(3))
+        else:
+            st.dataframe(st.session_state.all_dfs[st.session_state.scope])
+
+    with st.form("chat_form"):
+        user_query = st.text_input("Ask a question about your data:")
+        submitted = st.form_submit_button("Analyze")
+
+    if submitted and user_query:
+        context = build_context(st.session_state.all_dfs, st.session_state.scope)
+        with st.spinner("Processing..."):
+            code = get_analysis_code(user_query, context)
+            if code:
+                try:
+                    # Logic execution
+                    exec_globals = {'pd': pd, 'dfs': st.session_state.all_dfs}
+                    exec_locals = {}
+                    exec(code, exec_globals, exec_locals)
+                    calc_res = exec_locals.get('result', "No result variable created.")
+                    
+                    # Generate natural answer
+                    answer = generate_natural_answer(user_query, calc_res)
+                    st.markdown("### 💡 Result")
+                    st.markdown(answer)
+                    
+                    # Data display
+                    if isinstance(calc_res, (pd.DataFrame, pd.Series)):
+                        st.dataframe(calc_res)
+                    else:
+                        st.write(calc_res)
+                        
+                    with st.expander("Technical Logic"):
+                        st.code(code)
+                except Exception as e:
+                    st.error(f"Execution Error: {e}")
+                    st.code(code)
+else:
+    st.info("Upload an Excel file in the sidebar to begin.")
