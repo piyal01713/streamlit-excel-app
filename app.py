@@ -76,45 +76,4 @@ def get_analysis_code(user_query, context):
         "RESPOND ONLY WITH CODE."
     )
     try:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=1000,
-            system=system_prompt,
-            messages=[{"role": "user", "content": f"Context:\n{context}\n\nQuery: {user_query}"}]
-        )
-        return re.sub(r"```python\n|```", "", response.content[0].text.strip())
-    except Exception as e:
-        st.error(f"AI Error: {e}")
-        return None
-
-def generate_natural_answer(user_query, execution_result):
-    clean_system_prompt = (
-        "You are a concise data assistant. Summarize the data result clearly.\n"
-        "1. No preamble (don't say 'Here is the answer').\n"
-        "2. Use **bolding** for key identifiers and values.\n"
-        "3. Use bullet points for lists.\n"
-        "4. Be direct and professional."
-    )
-    try:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=500,
-            system=clean_system_prompt,
-            messages=[{"role": "user", "content": f"User asked: {user_query}\nRaw Result: {execution_result}"}]
-        )
-        return response.content[0].text
-    except:
-        return f"Result: {execution_result}"
-
-# ------------------------------------------------
-# STREAMLIT UI
-# ------------------------------------------------
-
-st.title("📊 Excel Insights")
-
-with st.sidebar:
-    st.header("1. Load Data")
-    input_method = st.radio("Source:", ["Upload File", "Cloud Link"])
-    
-    raw_data = None
-    if
+        res
