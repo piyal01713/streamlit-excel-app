@@ -9,7 +9,8 @@ import base64
 # CONFIG & INITIALIZATION
 # ------------------------------------------------
 
-st.set_page_config(page_title="Excel AI Agent (Grounded)", layout="wide")
+# CHANGED: Updated page title
+st.set_page_config(page_title="Excel Insights", layout="wide")
 
 # Using the requested model
 MODEL = "claude-haiku-4-5-20251001"
@@ -25,7 +26,7 @@ if "dataframes" not in st.session_state:
     st.session_state.dataframes = {}
 
 # ------------------------------------------------
-# HELPERS: URL CONVERSION (THE "FIX")
+# HELPERS: URL CONVERSION
 # ------------------------------------------------
 
 def get_direct_download_link(url):
@@ -46,7 +47,6 @@ def get_direct_download_link(url):
 
         # 3. OneDrive Personal
         elif "1drv.ms" in url or "onedrive.live.com" in url:
-            # Create a base64 encoded version of the share URL as required by MS API
             encoded_url = base64.b64encode(url.encode()).decode().replace('+', '-').replace('/', '_').rstrip('=')
             return f"https://api.onedrive.com/v1.0/shares/u!{encoded_url}/root/content"
 
@@ -142,7 +142,8 @@ def generate_natural_answer(user_query, execution_result):
 # STREAMLIT UI
 # ------------------------------------------------
 
-st.title("Excel AI Agent (Grounded)")
+# CHANGED: Updated Title
+st.title("Excel Insights")
 
 with st.sidebar:
     st.header("1. Data Source")
@@ -164,7 +165,6 @@ with st.sidebar:
             with st.spinner("Connecting to cloud..."):
                 dl_link = get_direct_download_link(url_input)
                 try:
-                    # Logic: Try reading as CSV first (best for GSheets export), then Excel
                     df = pd.read_csv(dl_link)
                 except:
                     try:
@@ -180,7 +180,7 @@ if df is not None:
     st.dataframe(df.head(5), use_container_width=True)
 
     st.subheader("💬 Ask a Question")
-    user_query = st.text_input("Example: 'What is the average sales by region?' or 'Show me the top 5 products by profit'")
+    user_query = st.text_input("Example: 'What are the top 5 sales?'")
     
     if user_query:
         context = build_data_context(df)
