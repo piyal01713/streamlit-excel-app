@@ -4,15 +4,15 @@ from anthropic import Anthropic
 import json
 import re
 import base64
+import io
+import requests
 
 # ------------------------------------------------
 # CONFIG & INITIALIZATION
 # ------------------------------------------------
 
-# CHANGED: Updated page title
 st.set_page_config(page_title="Excel Insights", layout="wide")
 
-# Using the requested model
 MODEL = "claude-haiku-4-5-20251001"
 
 api_key = st.secrets.get("ANTHROPIC_API_KEY")
@@ -22,25 +22,18 @@ if not api_key:
 
 client = Anthropic(api_key=api_key)
 
-if "dataframes" not in st.session_state:
-    st.session_state.dataframes = {}
-
 # ------------------------------------------------
 # HELPERS: URL CONVERSION
 # ------------------------------------------------
 
 def get_direct_download_link(url):
-    """
-    Transforms browser/share links into direct data streams.
-    Works for Google Sheets, GDrive Files, OneDrive Personal, and OneDrive Business.
-    """
     try:
-        # 1. Google Sheets (Native format)
+        # 1. Google Sheets (Native) -> Export as XLSX to get all sheets
         if "docs.google.com/spreadsheets" in url:
             file_id = re.search(r'/d/([^/]+)', url).group(1)
-            return f'https://docs.google.com/spreadsheets/d/{file_id}/export?format=csv'
+            return f'https://docs.google.com/spreadsheets/d/{file_id}/export?format=xlsx'
 
-        # 2. Google Drive (Uploaded .xlsx or .csv)
+        # 2. Google Drive (Uploaded .xlsx)
         elif "drive.google.com" in url:
             file_id = re.search(r'd/([^/]+)', url).group(1)
             return f'https://drive.google.com/uc?export=download&id={file_id}'
@@ -52,10 +45,7 @@ def get_direct_download_link(url):
 
         # 4. OneDrive Business / SharePoint
         elif "sharepoint.com" in url:
-            if "?" in url:
-                return url.split("?")[0] + "?download=1"
-            else:
-                return url + "?download=1"
+            return url.split("?")[0] + "?download=1" if "?" in url else url + "?download=1"
 
         return url
     except Exception as e:
@@ -70,12 +60,9 @@ def build_data_context(df):
     return f"""
 DATASET STRUCTURE:
 Columns: {list(df.columns)}
-Column Types:
-{df.dtypes.to_string()}
-
+Column Types: {df.dtypes.to_string()}
 Sample Rows:
 {df.head(10).to_string(index=False)}
-
 Row Count: {len(df)}
 """
 
@@ -103,14 +90,7 @@ def run_pandas_operation(df, op):
 # ------------------------------------------------
 
 def get_llm_response(user_query, data_context):
-    system_prompt = """You are an Excel AI Assistant. Analyze queries and output ONLY JSON:
-    - {"operation": "groupby_sum", "group": "col", "column": "col"}
-    - {"operation": "groupby_mean", "group": "col", "column": "col"}
-    - {"operation": "filter_equals", "column": "col", "value": "val"}
-    - {"operation": "filter_contains", "column": "col", "value": "val"}
-    - {"operation": "top_n", "column": "col", "n": 5}
-    - {"operation": "describe"}"""
-
+    system_prompt = """You are an Excel AI Assistant. Analyze queries and output ONLY JSON. No conversation."""
     try:
         response = client.messages.create(
             model=MODEL,
@@ -123,7 +103,6 @@ def get_llm_response(user_query, data_context):
             raw_text = re.sub(r"```[^\n]*\n?", "", raw_text).replace("```", "").strip()
         return json.loads(raw_text)
     except Exception as e:
-        st.error(f"Planner Error: {e}")
         return None
 
 def generate_natural_answer(user_query, execution_result):
@@ -131,7 +110,7 @@ def generate_natural_answer(user_query, execution_result):
         response = client.messages.create(
             model=MODEL,
             max_tokens=500,
-            system="Answer the user question based on the provided data results. Be concise and professional.",
+            system="Directly and naturally answer based on the data result.",
             messages=[{"role": "user", "content": f"Query: {user_query}\nResult: {execution_result}"}]
         )
         return response.content[0].text
@@ -142,64 +121,75 @@ def generate_natural_answer(user_query, execution_result):
 # STREAMLIT UI
 # ------------------------------------------------
 
-# CHANGED: Updated Title
 st.title("Excel Insights")
 
 with st.sidebar:
     st.header("1. Data Source")
-    input_method = st.radio("Select Method:", ["Upload File", "Cloud Link (GDrive/OneDrive)"])
+    input_method = st.radio("Select Method:", ["Upload File", "Cloud Link"])
     
-    df = None
+    raw_data = None
+    file_ext = ""
 
+    # Step 1: Get the raw bytes
     if input_method == "Upload File":
         uploaded_file = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx"])
         if uploaded_file:
-            if uploaded_file.name.endswith(".csv"):
-                df = pd.read_csv(uploaded_file)
-            else:
-                df = pd.read_excel(uploaded_file)
+            file_ext = "csv" if uploaded_file.name.endswith(".csv") else "xlsx"
+            raw_data = uploaded_file.read()
     else:
-        url_input = st.text_input("Paste Shareable Link:", placeholder="https://docs.google.com/...")
-        st.caption("⚠️ Ensure link is set to 'Anyone with the link can view'")
+        url_input = st.text_input("Paste Shareable Link:")
         if url_input:
-            with st.spinner("Connecting to cloud..."):
+            with st.spinner("Fetching cloud file..."):
                 dl_link = get_direct_download_link(url_input)
                 try:
-                    df = pd.read_csv(dl_link)
+                    response = requests.get(dl_link)
+                    raw_data = response.content
+                    # Determine extension from URL or content-type
+                    file_ext = "xlsx" if "xlsx" in dl_link or "spreadsheet" in url_input else "csv"
                 except:
-                    try:
-                        df = pd.read_excel(dl_link)
-                    except Exception as e:
-                        st.error("Failed to load. Check link permissions.")
+                    st.error("Failed to fetch. Check link permissions.")
+
+    # Step 2: Handle Sheet Selection
+    df = None
+    if raw_data:
+        if file_ext == "xlsx":
+            try:
+                excel_file = pd.ExcelFile(io.BytesIO(raw_data))
+                sheet_names = excel_file.sheet_names
+                
+                selected_sheet = sheet_names[0]
+                if len(sheet_names) > 1:
+                    st.success(f"Found {len(sheet_names)} sheets!")
+                    selected_sheet = st.selectbox("Select Sheet to Analyze:", sheet_names)
+                
+                df = excel_file.parse(selected_sheet)
+            except Exception as e:
+                st.error(f"Error parsing Excel: {e}")
+        else:
+            try:
+                df = pd.read_csv(io.BytesIO(raw_data))
+            except Exception as e:
+                st.error(f"Error parsing CSV: {e}")
 
 # MAIN INTERFACE
 if df is not None:
-    st.session_state.dataframes["active"] = df
-    
-    st.subheader("📊 Data Preview")
+    st.subheader(f"📊 Preview: {selected_sheet if 'selected_sheet' in locals() else 'Data'}")
     st.dataframe(df.head(5), use_container_width=True)
 
-    st.subheader("💬 Ask a Question")
-    user_query = st.text_input("Example: 'What are the top 5 sales?'")
+    user_query = st.text_input("Ask a question about this sheet:")
     
     if user_query:
         context = build_data_context(df)
-        
-        with st.spinner("Thinking..."):
+        with st.spinner("Analyzing..."):
             op = get_llm_response(user_query, context)
-            
-        if op:
-            with st.spinner("Calculating..."):
+            if op:
                 raw_result = run_pandas_operation(df, op)
-                final_answer = generate_natural_answer(user_query, raw_result)
-                
-            st.markdown("---")
-            st.markdown(f"### Assistant Answer\n{final_answer}")
-            
-            with st.expander("Show Technical Details"):
-                st.write("**Planned Operation:**")
-                st.json(op)
-                st.write("**Raw Data Result:**")
-                st.code(raw_result)
+                answer = generate_natural_answer(user_query, raw_result)
+                st.markdown(f"### Assistant Answer\n{answer}")
+                with st.expander("Technical Trace"):
+                    st.json(op)
+                    st.code(raw_result)
+            else:
+                st.warning("I couldn't map that to a data operation. Try rephrasing.")
 else:
-    st.info("Please provide a data source in the sidebar to begin.")
+    st.info("Upload a file or provide a link in the sidebar to begin.")
