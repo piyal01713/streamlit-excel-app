@@ -13,6 +13,7 @@ import requests
 
 st.set_page_config(page_title="Excel Insights", layout="wide")
 
+# Ensure this is the correct model ID you want to use
 MODEL = "claude-haiku-4-5-20251001" 
 
 if 'all_dfs' not in st.session_state:
@@ -54,7 +55,7 @@ def build_context(dfs_dict, scope):
         context = "SCOPE: ALL SHEETS. Dictionary: `dfs`.\n"
         for name, df in dfs_dict.items():
             context += f"Sheet: '{name}' | Columns: {list(df.columns)}\n"
-            context += f"Sample Data:\n{df.head(10).to_string(index=False)}\n---\n"
+            context += f"Sample Data:\n{df.head(5).to_string(index=False)}\n---\n"
     else:
         df = dfs_dict[scope]
         context = f"SCOPE: SHEET '{scope}'. Use `dfs['{scope}']`.\n"
@@ -62,7 +63,7 @@ def build_context(dfs_dict, scope):
     return context
 
 # ------------------------------------------------
-# AI LOGIC (FOR GENERATING CODE)
+# AI LOGIC
 # ------------------------------------------------
 
 def get_analysis_code(user_query, context):
@@ -84,22 +85,13 @@ def get_analysis_code(user_query, context):
         st.error(f"AI Error: {e}")
         return None
 
-# ------------------------------------------------
-# AI LOGIC (FOR CLEAN ANSWERS)
-# ------------------------------------------------
-
 def generate_natural_answer(user_query, execution_result):
-    """
-    This function was updated to provide the 'Cleaner' answer format.
-    """
     clean_system_prompt = (
-        "You are a concise data assistant. Your job is to summarize the data result for the user. "
-        "RULES FOR YOUR ANSWER:\n"
-        "1. Be direct. No preamble like 'Based on the data...' or 'I found that...'.\n"
-        "2. Use **bolding** for names, totals, and key identifiers.\n"
-        "3. Use bullet points if listing multiple items.\n"
-        "4. If something is not found, state it simply.\n"
-        "5. Use professional, clean Markdown formatting."
+        "You are a concise data assistant. Summarize the data result clearly.\n"
+        "1. No preamble (don't say 'Here is the answer').\n"
+        "2. Use **bolding** for key identifiers and values.\n"
+        "3. Use bullet points for lists.\n"
+        "4. Be direct and professional."
     )
     try:
         response = client.messages.create(
@@ -148,11 +140,21 @@ with st.sidebar:
 
 # MAIN INTERFACE
 if st.session_state.all_dfs:
-    with st.expander("👀 View Data"):
-        st.dataframe(st.session_state.all_dfs[st.session_state.scope] if st.session_state.scope != "Analyze All Sheets (Join/Compare)" else st.session_state.all_dfs)
+    
+    # --- FIXED DATA PREVIEW SECTION ---
+    with st.expander("👀 View Data Preview"):
+        if st.session_state.scope == "Analyze All Sheets (Join/Compare)":
+            st.write("Summary of all sheets in workbook:")
+            for sheet_name, df in st.session_state.all_dfs.items():
+                st.markdown(f"**Sheet:** `{sheet_name}` ({len(df)} rows)")
+                st.dataframe(df.head(3)) # Show just the first 3 rows of each
+        else:
+            # Show the specific selected sheet
+            st.dataframe(st.session_state.all_dfs[st.session_state.scope])
 
-    with st.form("chat"):
-        user_query = st.text_input("Ask a question:")
+    # --- CHAT INTERFACE ---
+    with st.form("chat_form"):
+        user_query = st.text_input("Ask a question about your data:")
         submitted = st.form_submit_button("Analyze")
 
     if submitted and user_query:
@@ -161,23 +163,28 @@ if st.session_state.all_dfs:
             code = get_analysis_code(user_query, context)
             if code:
                 try:
+                    # Execute logic
                     exec_globals = {'pd': pd, 'dfs': st.session_state.all_dfs}
                     exec_locals = {}
                     exec(code, exec_globals, exec_locals)
-                    calc_res = exec_locals.get('result', "No result")
+                    calc_res = exec_locals.get('result', "No result variable was created.")
                     
-                    # GET CLEAN ANSWER
+                    # Generate Cleaner Answer
                     answer = generate_natural_answer(user_query, calc_res)
                     
                     st.markdown("### 💡 Result")
-                    st.markdown(answer) # This renders the clean Markdown
+                    st.markdown(answer)
                     
+                    # If the AI returned a table/dataframe, show it
                     if isinstance(calc_res, (pd.DataFrame, pd.Series)):
-                        st.dataframe(calc_res)
+                        if not calc_res.empty:
+                            st.dataframe(calc_res)
                         
-                    with st.expander("Debug Logic"):
+                    with st.expander("Technical Logic"):
                         st.code(code)
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(f"Error executing code: {e}")
+                    with st.expander("View Code"):
+                        st.code(code)
 else:
-    st.info("Upload a file to begin.")
+    st.info("Please upload an Excel file in the sidebar to begin.")
