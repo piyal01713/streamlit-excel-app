@@ -13,9 +13,10 @@ import requests
 
 st.set_page_config(page_title="Excel Insights", layout="wide")
 
-MODEL = "claude-3-5-haiku-20241022" 
+# Updated model as per your request
+MODEL = "claude-haiku-4-5-20251001" 
 
-# Initialize Session State
+# Initialize Session State to keep data across reruns
 if 'all_dfs' not in st.session_state:
     st.session_state.all_dfs = None
 if 'scope' not in st.session_state:
@@ -59,21 +60,21 @@ def build_context(dfs_dict, scope):
         context = "SCOPE: ALL SHEETS. Dictionary: `dfs`.\n"
         for name, df in dfs_dict.items():
             context += f"Sheet: '{name}' | Columns: {list(df.columns)}\n"
-            context += f"Sample Data:\n{df.head(2).to_string(index=False)}\n---\n"
+            context += f"Sample:\n{df.head(2).to_string(index=False)}\n---\n"
     else:
         df = dfs_dict[scope]
         context = f"SCOPE: SHEET '{scope}'. Use `dfs['{scope}']`.\n"
-        context += f"Columns: {list(df.columns)}\nSample Data:\n{df.head(5).to_string(index=False)}"
+        context += f"Columns: {list(df.columns)}\nSamples:\n{df.head(5).to_string(index=False)}"
     return context
 
 def get_analysis_code(user_query, context):
-    system_prompt = "Write Python code that uses a dictionary of DataFrames named `dfs`. The final answer must be assigned to a variable named `result`. Output ONLY the code, no explanation."
+    system_prompt = "Write Python code for a dictionary of DataFrames named `dfs`. Result MUST be in a variable `result`. RESPOND ONLY WITH CODE."
     try:
         response = client.messages.create(
             model=MODEL,
             max_tokens=1000,
             system=system_prompt,
-            messages=[{"role": "user", "content": f"Context: {context}\n\nUser Question: {user_query}"}]
+            messages=[{"role": "user", "content": f"Context: {context}\n\nQuery: {user_query}"}]
         )
         return re.sub(r"```python\n|```", "", response.content[0].text.strip())
     except Exception as e:
@@ -85,8 +86,8 @@ def generate_natural_answer(user_query, execution_result):
         response = client.messages.create(
             model=MODEL,
             max_tokens=500,
-            system="The user asked a question and got a raw data result. Explain the result clearly in 1-2 sentences.",
-            messages=[{"role": "user", "content": f"Question: {user_query}\nRaw Result: {execution_result}"}]
+            system="Explain the data result naturally to the user.",
+            messages=[{"role": "user", "content": f"Query: {user_query}\nResult: {execution_result}"}]
         )
         return response.content[0].text
     except:
@@ -103,7 +104,6 @@ with st.sidebar:
     input_method = st.radio("Source:", ["Upload File", "Cloud Link"])
     
     raw_data = None
-    
     if input_method == "Upload File":
         uploaded_file = st.file_uploader("Upload XLSX", type=["xlsx"])
         if uploaded_file:
@@ -117,74 +117,56 @@ with st.sidebar:
                     res = requests.get(dl_link, timeout=15)
                     raw_data = res.content
                 except Exception as e:
-                    st.error(f"Connection failed: {e}")
+                    st.error(f"Error: {e}")
 
-    # Process data into session state
     if raw_data:
         try:
             excel_file = pd.ExcelFile(io.BytesIO(raw_data))
-            dfs = {sheet: excel_file.parse(sheet) for sheet in excel_file.sheet_names}
-            st.session_state.all_dfs = dfs
-            st.success("File Loaded!")
+            # Store in session state
+            st.session_state.all_dfs = {sheet: excel_file.parse(sheet) for sheet in excel_file.sheet_names}
+            st.success("Workbook Loaded!")
         except:
-            st.error("Error reading file. Check link permissions.")
+            st.error("Could not read file. Please check permissions.")
 
     if st.session_state.all_dfs:
-        st.session_state.scope = st.selectbox(
-            "Select Analysis Scope:", 
-            ["Analyze All Sheets (Join/Compare)"] + list(st.session_state.all_dfs.keys())
-        )
+        st.session_state.scope = st.selectbox("Scope:", ["Analyze All Sheets (Join/Compare)"] + list(st.session_state.all_dfs.keys()))
 
-# ------------------------------------------------
 # MAIN INTERFACE
-# ------------------------------------------------
-
 if st.session_state.all_dfs:
-    # 1. Preview
     with st.expander("👀 Data Preview"):
         if st.session_state.scope == "Analyze All Sheets (Join/Compare)":
+            st.write("Workbook Summary:")
             st.json({k: list(v.columns) for k, v in st.session_state.all_dfs.items()})
         else:
             st.dataframe(st.session_state.all_dfs[st.session_state.scope].head(10))
 
-    # 2. Input and Submit
-    with st.form("chat_form"):
-        user_query = st.text_input("Ask a question about your data:")
-        submitted = st.form_submit_button("Run Analysis")
+    # Using a form ensures the "Enter" key triggers the submit button
+    with st.form("query_form"):
+        user_query = st.text_input("Ask a question:")
+        submitted = st.form_submit_button("Analyze")
 
-    # 3. Execution Logic
     if submitted and user_query:
         context = build_context(st.session_state.all_dfs, st.session_state.scope)
-        
-        with st.spinner("AI is thinking..."):
+        with st.spinner("AI analyzing..."):
             code = get_analysis_code(user_query, context)
-            
             if code:
                 try:
-                    # Setup environment for code execution
                     exec_globals = {'pd': pd, 'dfs': st.session_state.all_dfs}
                     exec_locals = {}
-                    
                     exec(code, exec_globals, exec_locals)
+                    calc_res = exec_locals.get('result', "No result")
                     
-                    # Get the result variable defined in the generated code
-                    calc_res = exec_locals.get('result', "No 'result' variable produced.")
-                    
-                    # Generate natural language summary
                     answer = generate_natural_answer(user_query, calc_res)
                     
-                    st.markdown("---")
-                    st.markdown(f"### 💡 Answer\n{answer}")
+                    st.markdown(f"### Answer\n{answer}")
                     
-                    # Show result visually if it's a dataframe or chart-like object
                     if isinstance(calc_res, (pd.DataFrame, pd.Series)):
                         st.dataframe(calc_res)
-                    
-                    with st.expander("Show Technical Logic"):
-                        st.code(code, language="python")
                         
+                    with st.expander("Logic"):
+                        st.code(code)
                 except Exception as e:
-                    st.error(f"Code Execution Error: {e}")
+                    st.error(f"Execution Error: {e}")
                     st.code(code)
 else:
-    st.info("Please upload a file or paste a link in the sidebar to begin.")
+    st.info("Load an Excel file in the sidebar to begin.")
