@@ -12,7 +12,7 @@ st.set_page_config(page_title="Excel Insights Pro", layout="wide")
 
 MODELS = {
     "Claude 4.5 Haiku (Fast/Cheap)": "claude-haiku-4-5-20251001",
-    "Claude 3.5 Sonnet (Strong Reasoning)": "claude-sonnet-20241022",
+    "Claude 4.5 Sonnet (Strong Reasoning)": "claude-sonnet-4-5-20250929",
 }
 
 if 'all_dfs' not in st.session_state:
