@@ -6,7 +6,6 @@ import re
 import base64
 import io
 import requests
-import openpyxl
 
 # ------------------------------------------------
 # CONFIG & INITIALIZATION
@@ -14,7 +13,7 @@ import openpyxl
 
 st.set_page_config(page_title="Excel Insights", layout="wide")
 
-# Updated to the new Haiku model ID
+# Ensure this is the correct model ID you want to use
 MODEL = "claude-haiku-4-5-20251001" 
 
 if 'all_dfs' not in st.session_state:
@@ -48,7 +47,7 @@ def get_direct_download_link(url):
             encoded_url = base64.b64encode(url.encode()).decode().replace('+', '-').replace('/', '_').rstrip('=')
             return f"https://api.onedrive.com/v1.0/shares/u!{encoded_url}/root/content"
         return url
-    except Exception:
+    except:
         return url
 
 def build_context(dfs_dict, scope):
@@ -71,7 +70,8 @@ def get_analysis_code(user_query, context):
     system_prompt = (
         "You are a Python data expert. Write code for a dictionary of DataFrames named `dfs`. "
         "The final result MUST be in a variable named `result`. "
-        "Search all rows and columns for value matches. RESPOND ONLY WITH CODE."
+        "Search all rows and columns for value matches. "
+        "RESPOND ONLY WITH CODE."
     )
     try:
         response = client.messages.create(
@@ -86,16 +86,22 @@ def get_analysis_code(user_query, context):
         return None
 
 def generate_natural_answer(user_query, execution_result):
-    clean_system_prompt = "You are a concise data assistant. Summarize the result clearly using bolding and bullets."
+    clean_system_prompt = (
+        "You are a concise data assistant. Summarize the data result clearly.\n"
+        "1. No preamble (don't say 'Here is the answer').\n"
+        "2. Use **bolding** for key identifiers and values.\n"
+        "3. Use bullet points for lists.\n"
+        "4. Be direct and professional."
+    )
     try:
         response = client.messages.create(
             model=MODEL,
             max_tokens=500,
             system=clean_system_prompt,
-            messages=[{"role": "user", "content": f"User: {user_query}\nResult: {execution_result}"}]
+            messages=[{"role": "user", "content": f"User asked: {user_query}\nRaw Result: {execution_result}"}]
         )
         return response.content[0].text
-    except Exception:
+    except:
         return f"Result: {execution_result}"
 
 # ------------------------------------------------
@@ -111,8 +117,7 @@ with st.sidebar:
     raw_data = None
     if input_method == "Upload File":
         uploaded_file = st.file_uploader("Upload XLSX", type=["xlsx"])
-        if uploaded_file: 
-            raw_data = uploaded_file.read()
+        if uploaded_file: raw_data = uploaded_file.read()
     else:
         url_input = st.text_input("Paste Shareable Link:")
         if url_input:
@@ -121,66 +126,33 @@ with st.sidebar:
                 try:
                     res = requests.get(dl_link, timeout=15)
                     raw_data = res.content
-                except Exception as e:
-                    st.error(f"Link Error: {e}")
+                except: st.error("Link Error")
 
     if raw_data:
         try:
-            # Load with openpyxl to detect frozen rows (read_only=False required for panes)
-            wb = openpyxl.load_workbook(io.BytesIO(raw_data), data_only=True, read_only=False)
-            temp_dfs = {}
-
-            for sheet_name in wb.sheetnames:
-                ws = wb[sheet_name]
-                header_idx = 0 
-                
-                # Check 1: freeze_panes attribute (e.g. 'A2')
-                freeze = ws.freeze_panes
-                
-                # Check 2: Sheet views for ySplit (number of frozen rows)
-                y_split = 0
-                try:
-                    # Robust check for SheetViewList objects
-                    if hasattr(ws, 'views') and ws.views:
-                        view = ws.views[0]
-                        if hasattr(view, 'pane') and view.pane is not None:
-                            y_split = view.pane.ySplit or 0
-                except (AttributeError, TypeError, IndexError):
-                    y_split = 0
-
-                if freeze and freeze != 'A1':
-                    row_match = re.search(r'\d+', str(freeze))
-                    if row_match:
-                        # If row 2 is frozen (A2), row 1 (index 0) is likely the header
-                        header_idx = int(row_match.group()) - 2
-                elif y_split > 0:
-                    # If 1 row is frozen via ySplit, index 0 is the header
-                    header_idx = int(y_split) - 1
-                
-                header_idx = max(0, header_idx)
-                
-                # Parse sheet using detected header index
-                df = pd.read_excel(io.BytesIO(raw_data), sheet_name=sheet_name, header=header_idx)
-                temp_dfs[sheet_name] = df
-
-            st.session_state.all_dfs = temp_dfs
-            st.success("File Loaded successfully!")
-        except Exception as e:
-            st.error(f"Read Error: {e}")
+            excel_file = pd.ExcelFile(io.BytesIO(raw_data))
+            st.session_state.all_dfs = {sheet: excel_file.parse(sheet) for sheet in excel_file.sheet_names}
+            st.success("File Loaded!")
+        except: st.error("Read Error")
 
     if st.session_state.all_dfs:
         st.session_state.scope = st.selectbox("Scope:", ["Analyze All Sheets (Join/Compare)"] + list(st.session_state.all_dfs.keys()))
 
 # MAIN INTERFACE
 if st.session_state.all_dfs:
+    
+    # --- FIXED DATA PREVIEW SECTION ---
     with st.expander("👀 View Data Preview"):
         if st.session_state.scope == "Analyze All Sheets (Join/Compare)":
-            for name, df in st.session_state.all_dfs.items():
-                st.markdown(f"**Sheet:** `{name}`")
-                st.dataframe(df.head(3))
+            st.write("Summary of all sheets in workbook:")
+            for sheet_name, df in st.session_state.all_dfs.items():
+                st.markdown(f"**Sheet:** `{sheet_name}` ({len(df)} rows)")
+                st.dataframe(df.head(3)) # Show just the first 3 rows of each
         else:
+            # Show the specific selected sheet
             st.dataframe(st.session_state.all_dfs[st.session_state.scope])
 
+    # --- CHAT INTERFACE ---
     with st.form("chat_form"):
         user_query = st.text_input("Ask a question about your data:")
         submitted = st.form_submit_button("Analyze")
@@ -191,27 +163,28 @@ if st.session_state.all_dfs:
             code = get_analysis_code(user_query, context)
             if code:
                 try:
-                    # Logic execution
+                    # Execute logic
                     exec_globals = {'pd': pd, 'dfs': st.session_state.all_dfs}
                     exec_locals = {}
                     exec(code, exec_globals, exec_locals)
-                    calc_res = exec_locals.get('result', "No result variable created.")
+                    calc_res = exec_locals.get('result', "No result variable was created.")
                     
-                    # Generate natural answer
+                    # Generate Cleaner Answer
                     answer = generate_natural_answer(user_query, calc_res)
+                    
                     st.markdown("### 💡 Result")
                     st.markdown(answer)
                     
-                    # Data display
+                    # If the AI returned a table/dataframe, show it
                     if isinstance(calc_res, (pd.DataFrame, pd.Series)):
-                        st.dataframe(calc_res)
-                    else:
-                        st.write(calc_res)
+                        if not calc_res.empty:
+                            st.dataframe(calc_res)
                         
                     with st.expander("Technical Logic"):
                         st.code(code)
                 except Exception as e:
-                    st.error(f"Execution Error: {e}")
-                    st.code(code)
+                    st.error(f"Error executing code: {e}")
+                    with st.expander("View Code"):
+                        st.code(code)
 else:
-    st.info("Upload an Excel file in the sidebar to begin.")
+    st.info("Please upload an Excel file in the sidebar to begin.")
