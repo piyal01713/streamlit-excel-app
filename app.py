@@ -116,7 +116,8 @@ with st.sidebar:
     
     raw_data = None
     if input_method == "Upload File":
-        uploaded_file = st.file_uploader("Upload XLSX", type=["xlsx"])
+        # CHANGED: Added 'xlsm' to the allowed type list
+        uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx", "xlsm"])
         if uploaded_file: raw_data = uploaded_file.read()
     else:
         url_input = st.text_input("Paste Shareable Link:")
@@ -130,10 +131,12 @@ with st.sidebar:
 
     if raw_data:
         try:
-            excel_file = pd.ExcelFile(io.BytesIO(raw_data))
+            # CHANGED: Explicitly use 'openpyxl' engine which supports both .xlsx and .xlsm
+            excel_file = pd.ExcelFile(io.BytesIO(raw_data), engine='openpyxl')
             st.session_state.all_dfs = {sheet: excel_file.parse(sheet) for sheet in excel_file.sheet_names}
             st.success("File Loaded!")
-        except: st.error("Read Error")
+        except Exception as e: 
+            st.error(f"Read Error: {e}")
 
     if st.session_state.all_dfs:
         st.session_state.scope = st.selectbox("Scope:", ["Analyze All Sheets (Join/Compare)"] + list(st.session_state.all_dfs.keys()))
@@ -187,4 +190,4 @@ if st.session_state.all_dfs:
                     with st.expander("View Code"):
                         st.code(code)
 else:
-    st.info("Please upload an Excel file in the sidebar to begin.")
+    st.info("Please upload an Excel file (.xlsx or .xlsm) in the sidebar to begin.")
