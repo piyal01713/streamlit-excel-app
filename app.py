@@ -13,8 +13,12 @@ import requests
 
 st.set_page_config(page_title="Excel Insights", layout="wide")
 
-# Ensure this is the correct model ID you want to use
-MODEL = "claude-haiku-4-5-20251001" 
+# Available models for selection
+MODELS = {
+    "Claude 4.5 Haiku (Fast)": "claude-haiku-4-5-20251001",
+    "Claude 4.6 Sonnet (Smartest/Recommended)": "claude-sonnet-4-6",
+    "Claude 4.8 Opus (Powerful/Deep Reasoning)": "claude-opus-4-8"
+}
 
 if 'all_dfs' not in st.session_state:
     st.session_state.all_dfs = None
@@ -66,7 +70,7 @@ def build_context(dfs_dict, scope):
 # AI LOGIC
 # ------------------------------------------------
 
-def get_analysis_code(user_query, context):
+def get_analysis_code(user_query, context, model_id):
     system_prompt = (
         "You are a Python data expert. Write code for a dictionary of DataFrames named `dfs`. "
         "The final result MUST be in a variable named `result`. "
@@ -75,7 +79,7 @@ def get_analysis_code(user_query, context):
     )
     try:
         response = client.messages.create(
-            model=MODEL,
+            model=model_id,
             max_tokens=1000,
             system=system_prompt,
             messages=[{"role": "user", "content": f"Context:\n{context}\n\nQuery: {user_query}"}]
@@ -85,7 +89,7 @@ def get_analysis_code(user_query, context):
         st.error(f"AI Error: {e}")
         return None
 
-def generate_natural_answer(user_query, execution_result):
+def generate_natural_answer(user_query, execution_result, model_id):
     clean_system_prompt = (
         "You are a concise data assistant. Summarize the data result clearly.\n"
         "1. No preamble (don't say 'Here is the answer').\n"
@@ -95,7 +99,7 @@ def generate_natural_answer(user_query, execution_result):
     )
     try:
         response = client.messages.create(
-            model=MODEL,
+            model=model_id,
             max_tokens=500,
             system=clean_system_prompt,
             messages=[{"role": "user", "content": f"User asked: {user_query}\nRaw Result: {execution_result}"}]
@@ -111,13 +115,20 @@ def generate_natural_answer(user_query, execution_result):
 st.title("📊 Excel Insights")
 
 with st.sidebar:
-    st.header("1. Load Data")
+    st.header("1. Settings")
+    
+    # NEW: Model Selector
+    selected_model_name = st.selectbox("Claude Intelligence Level:", list(MODELS.keys()), index=1)
+    target_model_id = MODELS[selected_model_name]
+    
+    st.divider()
+    st.header("2. Load Data")
     input_method = st.radio("Source:", ["Upload File", "Cloud Link"])
     
     raw_data = None
     if input_method == "Upload File":
-        # CHANGED: Added 'xlsm' to the allowed type list
-        uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx", "xlsm"])
+        # UPDATED: Accept .xlsm
+        uploaded_file = st.file_uploader("Upload Excel (.xlsx, .xlsm)", type=["xlsx", "xlsm"])
         if uploaded_file: raw_data = uploaded_file.read()
     else:
         url_input = st.text_input("Paste Shareable Link:")
@@ -131,7 +142,7 @@ with st.sidebar:
 
     if raw_data:
         try:
-            # CHANGED: Explicitly use 'openpyxl' engine which supports both .xlsx and .xlsm
+            # UPDATED: Explicitly use openpyxl engine for .xlsm support
             excel_file = pd.ExcelFile(io.BytesIO(raw_data), engine='openpyxl')
             st.session_state.all_dfs = {sheet: excel_file.parse(sheet) for sheet in excel_file.sheet_names}
             st.success("File Loaded!")
@@ -144,50 +155,45 @@ with st.sidebar:
 # MAIN INTERFACE
 if st.session_state.all_dfs:
     
-    # --- FIXED DATA PREVIEW SECTION ---
     with st.expander("👀 View Data Preview"):
         if st.session_state.scope == "Analyze All Sheets (Join/Compare)":
             st.write("Summary of all sheets in workbook:")
             for sheet_name, df in st.session_state.all_dfs.items():
                 st.markdown(f"**Sheet:** `{sheet_name}` ({len(df)} rows)")
-                st.dataframe(df.head(3)) # Show just the first 3 rows of each
+                st.dataframe(df.head(3))
         else:
-            # Show the specific selected sheet
             st.dataframe(st.session_state.all_dfs[st.session_state.scope])
 
-    # --- CHAT INTERFACE ---
     with st.form("chat_form"):
         user_query = st.text_input("Ask a question about your data:")
         submitted = st.form_submit_button("Analyze")
 
     if submitted and user_query:
         context = build_context(st.session_state.all_dfs, st.session_state.scope)
-        with st.spinner("Processing..."):
-            code = get_analysis_code(user_query, context)
+        with st.spinner(f"Processing with {selected_model_name}..."):
+            code = get_analysis_code(user_query, context, target_model_id)
             if code:
                 try:
-                    # Execute logic
                     exec_globals = {'pd': pd, 'dfs': st.session_state.all_dfs}
                     exec_locals = {}
                     exec(code, exec_globals, exec_locals)
                     calc_res = exec_locals.get('result', "No result variable was created.")
                     
-                    # Generate Cleaner Answer
-                    answer = generate_natural_answer(user_query, calc_res)
+                    answer = generate_natural_answer(user_query, calc_res, target_model_id)
                     
                     st.markdown("### 💡 Result")
                     st.markdown(answer)
                     
-                    # If the AI returned a table/dataframe, show it
                     if isinstance(calc_res, (pd.DataFrame, pd.Series)):
                         if not calc_res.empty:
                             st.dataframe(calc_res)
                         
                     with st.expander("Technical Logic"):
+                        st.caption(f"Model used: {target_model_id}")
                         st.code(code)
                 except Exception as e:
                     st.error(f"Error executing code: {e}")
                     with st.expander("View Code"):
                         st.code(code)
 else:
-    st.info("Please upload an Excel file (.xlsx or .xlsm) in the sidebar to begin.")
+    st.info("Please upload an Excel file in the sidebar to begin.")
