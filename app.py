@@ -14,8 +14,8 @@ st.set_page_config(page_title="Excel Insights Pro", layout="wide")
 
 # Corrected Model IDs
 MODELS = {
-    "Claude 3.5 Haiku (Fast)": "claude-3-5-haiku-20241022",
-    "Claude 3.5 Sonnet (Strongest Reasoning)": "claude-3-5-sonnet-20241022",
+    "Claude 4.5 Haiku (Fast)": "claude-haiku-4-5-20251001",
+    "Claude 4.5 Sonnet (Strongest Reasoning)": "claude-sonnet-4-5-20250929",
 }
 
 if 'all_dfs' not in st.session_state:
