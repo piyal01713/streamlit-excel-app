@@ -482,15 +482,252 @@ def generate_natural_answer(user_query, execution_result, model_id):
 # 4. STREAMLIT UI
 # ------------------------------------------------
 
-st.title("📊 Excel Insights Pro")
+def inject_custom_css():
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+        
+        /* Font overrides */
+        html, body, .stMarkdown, p, h1, h2, h3, h4, h5, h6, .stButton button, input, label {
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif !important;
+        }
+
+        /* Center container adjustments */
+        .block-container {
+            padding-top: 1.5rem !important;
+            padding-bottom: 2rem !important;
+            max-width: 1200px !important;
+        }
+
+        /* Sidebar Styling */
+        [data-testid="stSidebar"] {
+            background-color: #0b0f19 !important;
+            border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+        }
+        /* Spaced sidebar layout with breathing room */
+        [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+            gap: 1.25rem !important;
+        }
+        [data-testid="stSidebar"] h2 {
+            font-size: 0.9rem !important;
+            font-weight: 600 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.06em !important;
+            margin-top: 1rem !important;
+            margin-bottom: 0.25rem !important;
+            color: #818cf8 !important;
+        }
+        [data-testid="stSidebar"] .stMarkdown p {
+            color: #94a3b8 !important;
+            margin-bottom: 0px !important;
+        }
+        [data-testid="stSidebar"] .stSelectbox label, 
+        [data-testid="stSidebar"] .stRadio label,
+        [data-testid="stSidebar"] .stTextInput label {
+            color: #cbd5e1 !important;
+            font-weight: 500 !important;
+            font-size: 0.85rem !important;
+            margin-bottom: 0.25rem !important;
+        }
+        [data-testid="stSidebarContent"] {
+            padding-top: 1rem !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+            padding-top: 0rem !important;
+            padding-left: 1.25rem !important;
+            padding-right: 1.25rem !important;
+        }
+        /* Make sidebar reset button subtle and secondary */
+        [data-testid="stSidebar"] .stButton button {
+            background: rgba(255, 255, 255, 0.04) !important;
+            color: #cbd5e1 !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            box-shadow: none !important;
+            font-size: 0.85rem !important;
+            font-weight: 500 !important;
+            padding: 6px 14px !important;
+            border-radius: 8px !important;
+            transition: all 0.2s ease !important;
+            margin-top: 0.5rem !important;
+        }
+        [data-testid="stSidebar"] .stButton button:hover {
+            background: rgba(255, 255, 255, 0.08) !important;
+            border-color: rgba(255, 255, 255, 0.2) !important;
+            color: #ffffff !important;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+        /* Hide scrollbars but allow scrolling if needed */
+        [data-testid="stSidebar"] > div:first-child {
+            scrollbar-width: none !important; /* Firefox */
+        }
+        [data-testid="stSidebar"] > div:first-child::-webkit-scrollbar {
+            display: none !important; /* Safari and Chrome */
+        }
+
+        /* Beautiful buttons */
+        .stButton button {
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
+            color: #ffffff !important;
+            border: none !important;
+            padding: 10px 20px !important;
+            border-radius: 10px !important;
+            font-weight: 600 !important;
+            letter-spacing: 0.025em !important;
+            box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.2), 0 2px 4px -1px rgba(99, 102, 241, 0.1) !important;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            width: 100% !important;
+        }
+        .stButton button:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.3), 0 4px 6px -2px rgba(99, 102, 241, 0.15) !important;
+            background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%) !important;
+        }
+        .stButton button:active {
+            transform: translateY(0px) !important;
+        }
+
+        /* Upload area styling */
+        [data-testid="stFileUploader"] {
+            border: 2px dashed rgba(99, 102, 241, 0.25) !important;
+            border-radius: 12px !important;
+            background-color: rgba(99, 102, 241, 0.01) !important;
+            padding: 16px !important;
+            transition: all 0.3s ease !important;
+        }
+        [data-testid="stFileUploader"]:hover {
+            border-color: #6366f1 !important;
+            background-color: rgba(99, 102, 241, 0.04) !important;
+        }
+        [data-testid="stFileUploader"] section {
+            background-color: transparent !important;
+            padding: 0 !important;
+        }
+
+        /* Expander styling */
+        .stExpander {
+            border: 1px solid rgba(226, 232, 240, 0.08) !important;
+            background-color: rgba(30, 41, 59, 0.2) !important;
+            border-radius: 12px !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+            margin-bottom: 1.25rem !important;
+            overflow: hidden !important;
+        }
+        .stExpander summary {
+            font-size: 1.02rem !important;
+            font-weight: 600 !important;
+            color: #f1f5f9 !important;
+            padding: 10px 14px !important;
+        }
+        .stExpander summary:hover {
+            background-color: rgba(99, 102, 241, 0.08) !important;
+            color: #818cf8 !important;
+        }
+
+        /* Input overrides */
+        .stTextInput input, .stSelectbox div[role="button"] {
+            border-radius: 8px !important;
+            border: 1px solid rgba(226, 232, 240, 0.12) !important;
+            background-color: rgba(30, 41, 59, 0.4) !important;
+            color: #f1f5f9 !important;
+            transition: all 0.2s ease !important;
+        }
+        .stTextInput input:focus {
+            border-color: #6366f1 !important;
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
+        }
+
+        /* Chat Message Bubbles */
+        [data-testid="stChatMessage"] {
+            background-color: rgba(30, 41, 59, 0.3) !important;
+            border-radius: 16px !important;
+            border: 1px solid rgba(226, 232, 240, 0.06) !important;
+            padding: 1rem 1.25rem !important;
+            margin-bottom: 1rem !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.04) !important;
+        }
+        
+        /* Chat Input */
+        .stChatInput {
+            border-radius: 12px !important;
+            border: 1px solid rgba(99, 102, 241, 0.2) !important;
+            background-color: rgba(15, 23, 42, 0.8) !important;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3) !important;
+        }
+        .stChatInput:focus-within {
+            border-color: #6366f1 !important;
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3), 0 10px 15px -3px rgba(0, 0, 0, 0.3) !important;
+        }
+
+        /* Custom Badge elements for layout */
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            border-radius: 20px;
+            margin-right: 6px;
+            margin-bottom: 6px;
+        }
+        .badge-primary {
+            background-color: rgba(99, 102, 241, 0.15);
+            color: #818cf8;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+        .badge-secondary {
+            background-color: rgba(168, 85, 247, 0.15);
+            color: #c084fc;
+            border: 1px solid rgba(168, 85, 247, 0.3);
+        }
+        .badge-success {
+            background-color: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+        .badge-neutral {
+            background-color: rgba(148, 163, 184, 0.15);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+        }
+
+        /* Card panels */
+        .card-panel {
+            background: rgba(30, 41, 59, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+inject_custom_css()
+
+# Styled header banner
+st.markdown(
+    """
+    <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #c084fc 100%); padding: 24px 32px; border-radius: 16px; margin-bottom: 28px; box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.25);">
+        <h1 style="color: #ffffff; margin: 0; font-size: 2.3rem; font-weight: 800; letter-spacing: -0.025em; display: flex; align-items: center; gap: 12px; font-family: 'Outfit', sans-serif;">
+            Excel Insights Pro
+        </h1>
+        <p style="color: rgba(255, 255, 255, 0.9); margin: 6px 0 0 0; font-size: 1.05rem; font-weight: 400; max-width: 800px; line-height: 1.4; font-family: 'Outfit', sans-serif;">
+            Unlock deep analytics from multi-tab Excel files. Detect layout configurations automatically, query across worksheets, and visualize findings using advanced model intelligence.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 with st.sidebar:
     st.caption("API key loaded from secrets")
     st.header("1. Intelligence Settings")
-    selected_model_name = st.selectbox("Model:", list(MODELS.keys()), index=1)
+    selected_model_name = st.selectbox("Model:", list(MODELS.keys()), index=0)
     target_model_id = MODELS[selected_model_name]
 
-    st.divider()
     st.header("2. Analysis Depth")
     analysis_depth = st.radio(
         "Vision Range:",
@@ -498,7 +735,6 @@ with st.sidebar:
         help="Controls how many sample rows are sent to the model (not the full sheet).",
     )
 
-    st.divider()
     st.header("3. Load Data")
     input_method = st.radio("Source:", ["Upload File", "Cloud Link"])
 
@@ -521,7 +757,12 @@ with st.sidebar:
     if raw_data:
         try:
             st.session_state.all_sheets = load_workbook_sheets(raw_data)
-            st.success("Workbook Loaded!")
+            st.markdown(
+                '<div class="badge badge-success" style="display: block; text-align: center; margin: 4px 0; padding: 6px 10px; font-size: 0.85rem;">'
+                '✓ Workbook Loaded'
+                '</div>',
+                unsafe_allow_html=True
+            )
         except Exception as e:
             st.error(f"Read Error: {e}")
 
@@ -531,7 +772,6 @@ with st.sidebar:
             ["Analyze All Sheets (Join/Compare)"] + list(st.session_state.all_sheets.keys()),
         )
 
-    st.divider()
     if st.button("New Conversation"):
         st.session_state.chat_history = []
         st.rerun()
@@ -549,12 +789,48 @@ if st.session_state.all_sheets:
         st.dataframe(preview_info["df"].head(50))
 
     with st.expander("📋 Detected Headers & Metadata"):
-        st.write(f"**Sheet:** {preview_key}")
-        st.write(f"**Detected header row (0-indexed):** {preview_info['header_row']}")
-        st.write(f"**Detected header row (Excel row):** {preview_info['header_row'] + 1}")
-        st.write(f"**Data starts at row (0-indexed):** {preview_info['data_start_row']}")
-        st.write(f"**Header labels:** {preview_info['header_labels'][:20]}")
-        st.write(f"**Top candidates:** {preview_info['header_candidates']}")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(
+                f'<div class="card-panel" style="text-align: center;">'
+                f'<div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 4px;">Target Sheet</div>'
+                f'<div style="font-size: 1.1rem; font-weight: 700; color: #f1f5f9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{preview_key}</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        with col2:
+            st.markdown(
+                f'<div class="card-panel" style="text-align: center;">'
+                f'<div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 4px;">Header Row (Excel)</div>'
+                f'<div style="font-size: 1.1rem; font-weight: 700; color: #818cf8;">Row {preview_info["header_row"] + 1} <span style="font-size: 0.75rem; font-weight: 400; color: #64748b;">(0-idx: {preview_info["header_row"]})</span></div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        with col3:
+            st.markdown(
+                f'<div class="card-panel" style="text-align: center;">'
+                f'<div style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 4px;">Data Starts (0-indexed)</div>'
+                f'<div style="font-size: 1.1rem; font-weight: 700; color: #34d399;">Row {preview_info["data_start_row"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+        st.markdown("<h4 style='font-size: 1rem; color: #e2e8f0; margin-bottom: 8px;'>Detected Header Labels</h4>", unsafe_allow_html=True)
+        labels_html = ""
+        for col_idx, label in preview_info["header_labels"][:30]:
+            labels_html += f'<span class="badge badge-primary">Col {col_idx}: {label}</span>'
+        if len(preview_info["header_labels"]) > 30:
+            labels_html += f'<span class="badge badge-neutral">+{len(preview_info["header_labels"]) - 30} more</span>'
+        st.markdown(f'<div style="margin-bottom: 16px;">{labels_html}</div>', unsafe_allow_html=True)
+
+        st.markdown("<h4 style='font-size: 1rem; color: #e2e8f0; margin-bottom: 8px;'>Top Header Candidates (0-indexed Row & Score)</h4>", unsafe_allow_html=True)
+        candidates_html = ""
+        for row_idx, score in preview_info["header_candidates"]:
+            color_class = "badge-success" if row_idx == preview_info["header_row"] else "badge-secondary"
+            candidates_html += f'<span class="badge {color_class}">Row {row_idx} (Score: {score:.2f})</span>'
+        st.markdown(f'<div style="margin-bottom: 16px;">{candidates_html}</div>', unsafe_allow_html=True)
+
+        st.markdown("<h4 style='font-size: 1rem; color: #e2e8f0; margin-bottom: 8px;'>Sheet Sheet Properties</h4>", unsafe_allow_html=True)
         st.json(preview_info["metadata"])
 
     for msg in st.session_state.chat_history:
@@ -610,4 +886,32 @@ if st.session_state.all_sheets:
                     st.info("Tip: Check detected header row in the metadata expander if columns look wrong.")
                     st.code(code)
 else:
-    st.info("Upload an Excel file or paste a Google Sheet link in the sidebar to begin.")
+    st.markdown(
+        """
+        <div style="text-align: center; padding: 48px 20px; max-width: 900px; margin: 0 auto; font-family: 'Outfit', sans-serif;">
+            <div style="font-size: 4.5rem; margin-bottom: 20px;">📥</div>
+            <h2 style="font-size: 2.1rem; font-weight: 700; color: #f1f5f9; margin-bottom: 12px; letter-spacing: -0.02em;">Welcome to Excel Insights Pro</h2>
+            <p style="color: #94a3b8; font-size: 1.1rem; line-height: 1.6; margin-bottom: 40px; max-width: 650px; margin-left: auto; margin-right: auto;">
+                Get instant analytics, answer complex questions, and compare datasets across your Excel files. To begin, use the sidebar to load your data.
+            </p>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; text-align: left;">
+                <div style="background: rgba(99, 102, 241, 0.03); border: 1px solid rgba(99, 102, 241, 0.08); padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                    <div style="font-size: 1.8rem; margin-bottom: 10px;">🔍</div>
+                    <h4 style="font-weight: 700; color: #f1f5f9; margin: 0 0 8px 0; font-size: 1.05rem;">1. Layout Auto-Detection</h4>
+                    <p style="font-size: 0.9rem; color: #94a3b8; margin: 0; line-height: 1.45;">Smart scanning dynamically pinpoints table headers, merged title sections, and frozen boundaries inside multi-tab sheets.</p>
+                </div>
+                <div style="background: rgba(168, 85, 247, 0.03); border: 1px solid rgba(168, 85, 247, 0.08); padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                    <div style="font-size: 1.8rem; margin-bottom: 10px;">🤖</div>
+                    <h4 style="font-weight: 700; color: #f1f5f9; margin: 0 0 8px 0; font-size: 1.05rem;">2. Code-Backed Reasoning</h4>
+                    <p style="font-size: 0.9rem; color: #94a3b8; margin: 0; line-height: 1.45;">Claude writes robust Pandas analysis routines executed in a secure local sandboxed scope to ensure mathematical precision.</p>
+                </div>
+                <div style="background: rgba(244, 63, 94, 0.03); border: 1px solid rgba(244, 63, 94, 0.08); padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                    <div style="font-size: 1.8rem; margin-bottom: 10px;">💬</div>
+                    <h4 style="font-weight: 700; color: #f1f5f9; margin: 0 0 8px 0; font-size: 1.05rem;">3. Interactive Chat</h4>
+                    <p style="font-size: 0.9rem; color: #94a3b8; margin: 0; line-height: 1.45;">Keep the context alive. Ask follow-up queries, request chart derivations, or drill down into anomalies with fluid history tracking.</p>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
