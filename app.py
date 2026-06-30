@@ -13,7 +13,7 @@ from anthropic import Anthropic
 # 1. CONFIG & INITIALIZATION
 # ------------------------------------------------
 
-st.set_page_config(page_title="Excel Insights Pro", layout="wide")
+st.set_page_config(page_title="Resource Insights", layout="wide")
 
 MODELS = {
     "Claude 4.5 Haiku": "claude-haiku-4-5-20251001",
@@ -712,7 +712,7 @@ st.markdown(
     """
     <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #c084fc 100%); padding: 24px 32px; border-radius: 16px; margin-bottom: 28px; box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.25);">
         <h1 style="color: #ffffff; margin: 0; font-size: 2.3rem; font-weight: 800; letter-spacing: -0.025em; display: flex; align-items: center; gap: 12px; font-family: 'Outfit', sans-serif;">
-            Excel Insights Pro
+            Resource Insights
         </h1>
         <p style="color: rgba(255, 255, 255, 0.9); margin: 6px 0 0 0; font-size: 1.05rem; font-weight: 400; max-width: 800px; line-height: 1.4; font-family: 'Outfit', sans-serif;">
             Unlock deep analytics from multi-tab Excel files. Detect layout configurations automatically, query across worksheets, and visualize findings using advanced model intelligence.
@@ -890,7 +890,7 @@ else:
         """
         <div style="text-align: center; padding: 48px 20px; max-width: 900px; margin: 0 auto; font-family: 'Outfit', sans-serif;">
             <div style="font-size: 4.5rem; margin-bottom: 20px;">📥</div>
-            <h2 style="font-size: 2.1rem; font-weight: 700; color: #f1f5f9; margin-bottom: 12px; letter-spacing: -0.02em;">Welcome to Excel Insights Pro</h2>
+            <h2 style="font-size: 2.1rem; font-weight: 700; color: #f1f5f9; margin-bottom: 12px; letter-spacing: -0.02em;">Welcome to Resource Insights</h2>
             <p style="color: #94a3b8; font-size: 1.1rem; line-height: 1.6; margin-bottom: 40px; max-width: 650px; margin-left: auto; margin-right: auto;">
                 Get instant analytics, answer complex questions, and compare datasets across your Excel files. To begin, use the sidebar to load your data.
             </p>
